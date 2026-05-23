@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import jwt
+import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from symphony_dbcli.config import GitHubConfig
 from symphony_dbcli.github_app import default_manifest
-from symphony_dbcli.github_auth import create_app_jwt
+from symphony_dbcli.github_auth import AppCredentials, create_app_jwt
 
 
 def test_default_manifest_has_required_permissions() -> None:
@@ -56,3 +58,16 @@ def test_app_jwt_uses_rs256_and_app_issuer() -> None:
     assert decoded["iss"] == "12345"
     assert decoded["iat"] == 1_699_999_940
     assert decoded["exp"] == 1_700_000_540
+
+
+def test_app_credentials_do_not_require_installation_id_for_app_jwt(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = GitHubConfig()
+    monkeypatch.setenv(config.app_id_env, "12345")
+    monkeypatch.setenv(config.private_key_env, "private-key")
+    monkeypatch.delenv(config.installation_id_env, raising=False)
+
+    credentials = AppCredentials.from_env(config)
+
+    assert credentials is not None
+    assert credentials.app_id == "12345"
+    assert credentials.installation_id is None

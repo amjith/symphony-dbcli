@@ -27,16 +27,18 @@ class InstallationToken:
 @dataclass(frozen=True)
 class AppCredentials:
     app_id: str
-    installation_id: str
     private_key: str
+    installation_id: str | None
 
     @staticmethod
     def from_env(config: GitHubConfig) -> AppCredentials | None:
         app_id = os.environ.get(config.app_id_env)
         installation_id = os.environ.get(config.installation_id_env)
         private_key = _private_key_from_env(config)
-        if app_id and installation_id and private_key:
-            return AppCredentials(app_id=app_id, installation_id=installation_id, private_key=private_key)
+        if app_id and private_key:
+            return AppCredentials(
+                app_id=app_id, installation_id=installation_id or None, private_key=private_key
+            )
         return None
 
 
@@ -69,7 +71,7 @@ class GitHubAuthenticator:
 
     def installation_token(self) -> str:
         credentials = AppCredentials.from_env(self.config)
-        if credentials is None:
+        if credentials is None or credentials.installation_id is None:
             raise GitHubAuthError(
                 "GitHub App auth requires "
                 f"${self.config.app_id_env}, ${self.config.installation_id_env}, and "
