@@ -1,0 +1,52 @@
+[project]
+name = "symphony-dbcli"
+version = "0.1.0"
+description = "A Python Symphony-style worker orchestrator for dbcli projects."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Amjith Ramanujam" }]
+license = "MIT"
+dependencies = [
+  "jinja2>=3.1",
+]
+
+[project.scripts]
+symphony-dbcli = "symphony_dbcli.cli:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.13",
+  "pre-commit>=4.0",
+  "pytest>=8.0",
+  "ruff>=0.8.0",
+  "types-jinja2>=2.11.9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/symphony_dbcli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/symphony_dbcli", "tests"]
+warn_unreachable = true
+show_error_codes = true

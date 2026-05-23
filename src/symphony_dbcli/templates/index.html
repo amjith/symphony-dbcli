@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block body %}
+<section class="metrics">
+  <div class="metric"><strong>{{ summary.issue_count }}</strong><span>Issues</span></div>
+  <div class="metric"><strong>{{ summary.running_attempts }}</strong><span>Running</span></div>
+  <div class="metric"><strong>{{ summary.queued_attempts }}</strong><span>Queued</span></div>
+  <div class="metric"><strong>{{ summary.turn_count }}</strong><span>Turns</span></div>
+  <div class="metric"><strong>{{ summary.error_count }}</strong><span>Errors</span></div>
+</section>
+
+<section class="toolbar">
+  <form action="/ask" method="get">
+    <input name="q" placeholder="Ask about issue timing, turns, errors, or workers" />
+    <button type="submit">Ask</button>
+  </form>
+</section>
+
+<section>
+  <h2>Recent Attempts</h2>
+  {% if summary.attempts %}
+  <table>
+    <thead>
+      <tr><th>Issue</th><th>Status</th><th>Phase</th><th>Turns</th><th>Errors</th><th>Duration</th></tr>
+    </thead>
+    <tbody>
+      {% for row in summary.attempts %}
+      <tr>
+        <td>
+          <a href="{{ row.repo|issue_path(row.issue_number) }}">{{ row.repo }}#{{ row.issue_number }}</a>
+          <a class="muted" href="/attempts/{{ row.id }}">attempt {{ row.id }}</a>
+        </td>
+        <td>{{ row.status }}</td>
+        <td>{{ row.current_phase or "-" }}</td>
+        <td>{{ row.turn_count }}</td>
+        <td>{{ row.error_count }}</td>
+        <td>{{ row.duration_ms|ms }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No attempts yet.</div>
+  {% endif %}
+</section>
+{% endblock %}

@@ -78,7 +78,7 @@ Symphony model with DBCLI-specific settings.
 `WORKFLOW.md` should be created interactively by `symphony-dbcli init-workflow`.
 The wizard must ask for the tracker repositories, GitHub label mapping, worker
 limits, worktree root, database path, dashboard binding, and default task
-policies. It should write a readable Markdown file with a fenced YAML config
+policies. It should write a readable Markdown file with a fenced TOML config
 block plus prose instructions for workers.
 
 Minimum v1 configuration fields:

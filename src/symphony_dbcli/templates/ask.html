@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block body %}
+<section class="toolbar">
+  <form action="/ask" method="get">
+    <input name="q" value="{{ question }}" />
+    <button type="submit">Ask</button>
+  </form>
+</section>
+<section class="answer">{{ answer }}</section>
+{% endblock %}

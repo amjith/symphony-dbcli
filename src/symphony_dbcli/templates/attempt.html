@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block body %}
+{% if not detail %}
+<section class="empty">Attempt not found.</section>
+{% else %}
+<section class="metrics">
+  <div class="metric"><strong>{{ detail.attempt.status }}</strong><span>Status</span></div>
+  <div class="metric"><strong>{{ detail.attempt.turn_count }}</strong><span>Turns</span></div>
+  <div class="metric"><strong>{{ detail.attempt.error_count }}</strong><span>Errors</span></div>
+  <div class="metric"><strong>{{ detail.attempt.codex_duration_ms|ms }}</strong><span>Codex</span></div>
+</section>
+
+<section>
+  <h2>Workspace</h2>
+  <table>
+    <tbody>
+      <tr><th>Repo</th><td>{{ detail.attempt.repo }}#{{ detail.attempt.issue_number }}</td></tr>
+      <tr><th>Branch</th><td>{{ detail.attempt.branch or "-" }}</td></tr>
+      <tr><th>Worktree</th><td>{{ detail.attempt.worktree_path or "-" }}</td></tr>
+      <tr><th>Workflow</th><td>{{ detail.attempt.workflow_version_id or "unknown" }}</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Timeline</h2>
+  {% if detail.timeline %}
+  <table>
+    <thead><tr><th>Phase</th><th>Event</th><th>Message</th><th>Duration</th></tr></thead>
+    <tbody>
+      {% for row in detail.timeline %}
+      <tr><td>{{ row.phase }}</td><td>{{ row.event_type }}</td><td>{{ row.message }}</td><td>{{ row.duration_ms|ms }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No timeline events.</div>
+  {% endif %}
+</section>
+
+<section>
+  <h2>Errors</h2>
+  {% if detail.errors %}
+  <table>
+    <thead><tr><th>Phase</th><th>Type</th><th>Message</th></tr></thead>
+    <tbody>
+      {% for row in detail.errors %}
+      <tr><td>{{ row.phase }}</td><td>{{ row.error_type }}</td><td class="error">{{ row.message }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">No errors.</div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
