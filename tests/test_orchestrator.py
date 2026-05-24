@@ -25,6 +25,30 @@ def test_code_follow_up_prompt_includes_research_context() -> None:
     assert "Expand log_file" in prompt
 
 
+def test_orchestrator_claim_records_workflow_runtime_state(tmp_path: Path) -> None:
+    store = _seed_store(tmp_path)
+
+    attempt_id = Orchestrator(default_config(), store, github=FakeCleanupGitHub()).claim_next()
+
+    assert attempt_id is not None
+    instance = store.workflow_instance_for_attempt(attempt_id)
+    assert instance is not None
+    assert instance["current_state"] == "claimed"
+    with store.connect() as conn:
+        action_run = conn.execute(
+            "SELECT * FROM workflow_action_runs WHERE workflow_instance_id = ?", (instance["id"],)
+        ).fetchone()
+        transition = conn.execute(
+            "SELECT * FROM workflow_transition_events WHERE workflow_instance_id = ?", (instance["id"],)
+        ).fetchone()
+    assert action_run is not None
+    assert action_run["transition_name"] == "claim_issue"
+    assert action_run["status"] == "succeeded"
+    assert transition is not None
+    assert transition["from_state"] == "todo"
+    assert transition["to_state"] == "claimed"
+
+
 def test_orchestrator_cleans_worktree_after_pr_merge(tmp_path: Path) -> None:
     store = _seed_store(tmp_path)
     source = tmp_path / "source"

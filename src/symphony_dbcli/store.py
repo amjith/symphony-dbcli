@@ -194,6 +194,22 @@ class Store:
                 ).fetchone(),
             )
 
+    def workflow_instance_for_attempt(self, attempt_id: int) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return cast(
+                sqlite3.Row | None,
+                conn.execute(
+                    """
+                    SELECT *
+                    FROM workflow_instances
+                    WHERE attempt_id = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    (attempt_id,),
+                ).fetchone(),
+            )
+
     def start_workflow_action_run(
         self,
         *,
@@ -319,6 +335,49 @@ class Store:
                     from_state,
                     to_state,
                     json.dumps(data or {}, sort_keys=True),
+                    now,
+                ),
+            )
+            return _lastrowid(cursor)
+
+    def fail_workflow_instance(
+        self,
+        instance_id: int,
+        *,
+        workflow_version_id: int | None,
+        message: str,
+    ) -> int:
+        now = utc_now()
+        with self.connect() as conn:
+            current = conn.execute(
+                "SELECT current_state FROM workflow_instances WHERE id = ?",
+                (instance_id,),
+            ).fetchone()
+            if not current:
+                raise ValueError(f"Workflow instance {instance_id} does not exist.")
+            from_state = str(current["current_state"])
+            conn.execute(
+                """
+                UPDATE workflow_instances
+                SET current_state = 'failed', status = 'failed',
+                    completed_at = COALESCE(completed_at, ?), updated_at = ?
+                WHERE id = ?
+                """,
+                (now, now, instance_id),
+            )
+            cursor = conn.execute(
+                """
+                INSERT INTO workflow_transition_events(
+                    workflow_instance_id, workflow_version_id, transition_name, action_name,
+                    trigger, from_state, to_state, data_json, created_at
+                )
+                VALUES(?, ?, 'runtime_failed', '', 'automatic', ?, 'failed', ?, ?)
+                """,
+                (
+                    instance_id,
+                    workflow_version_id,
+                    from_state,
+                    json.dumps({"message": message}, sort_keys=True),
                     now,
                 ),
             )

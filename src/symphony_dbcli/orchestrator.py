@@ -6,9 +6,9 @@ import sqlite3
 import threading
 import traceback
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from .config import WorkflowConfig, WorkflowError, parse_workflow
 from .github import GitHubClient, GitHubError, GitHubIssue, PullRequest
@@ -38,6 +38,18 @@ class WorktreeCleanupSummary:
     cleaned: int = 0
     skipped: int = 0
     errors: int = 0
+
+
+@dataclass(frozen=True)
+class WorkflowActionRuntime:
+    instance_id: int
+    attempt_id: int | None
+    action_run_id: int
+    transition_name: str
+    action_name: str
+    trigger: str
+    from_state: str
+    to_state: str
 
 
 def load_and_record_workflow(
@@ -190,12 +202,29 @@ class Orchestrator:
     def _claim_issue(self, issue: sqlite3.Row) -> int:
         repo = str(issue["repo"])
         issue_number = int(issue["number"])
+        task_type = str(issue["task_type"])
         attempt_id = self.store.create_attempt(
             repo=repo,
             issue_number=issue_number,
-            task_type=str(issue["task_type"]),
+            task_type=task_type,
             workflow_version_id=self.workflow_version_id,
             status="queued",
+        )
+        instance_id = self.store.create_workflow_instance(
+            repo=repo,
+            issue_number=issue_number,
+            task_type=task_type,
+            workflow_version_id=self.workflow_version_id,
+            initial_state=self._transition_from_state(
+                "claim_issue", fallback=self.config.workflow.initial_state
+            ),
+            attempt_id=attempt_id,
+        )
+        action = self._start_workflow_action(
+            instance_id,
+            attempt_id=attempt_id,
+            transition_name="claim_issue",
+            input_data={"repo": repo, "issue_number": issue_number, "task_type": task_type},
         )
         self.store.record_timeline_event(
             attempt_id,
@@ -203,12 +232,26 @@ class Orchestrator:
             event_type="claimed",
             message=f"{repo}#{issue_number}",
         )
-        if not self.config.policy.dry_run:
-            self.github.add_labels(repo, issue_number, [self.config.labels.working])
-            try:
-                self.github.remove_label(repo, issue_number, self.config.labels.todo)
-            except GitHubError:
-                pass
+        try:
+            if not self.config.policy.dry_run:
+                self.github.add_labels(repo, issue_number, [self.config.labels.working])
+                try:
+                    self.github.remove_label(repo, issue_number, self.config.labels.todo)
+                except GitHubError:
+                    pass
+            self._finish_workflow_action(
+                action,
+                "succeeded",
+                output_data={"dry_run": self.config.policy.dry_run, "label": self.config.labels.working},
+            )
+            self._transition_workflow_action(
+                action,
+                data={"dry_run": self.config.policy.dry_run, "attempt_id": attempt_id},
+            )
+        except Exception as exc:
+            self._finish_workflow_action(action, "failed", error=str(exc))
+            self._fail_workflow_instance(instance_id, str(exc))
+            raise
         return attempt_id
 
     def run_issue(self, repo: str, issue_number: int, *, task_type: str | None = None) -> int:
@@ -248,6 +291,10 @@ class Orchestrator:
         issue = self.store.issue_detail(repo, issue_number)
         title = repo if not issue else str(issue["issue"]["title"])
         worker_id = str(attempt["worker_id"] or f"worker-{attempt_id}-{uuid.uuid4().hex[:8]}")
+        instance_id = self._workflow_instance_id_for_attempt(
+            attempt,
+            initial_state=self._transition_from_state("allocate_workspace", fallback="claimed"),
+        )
         self.store.start_attempt(
             attempt_id,
             worker_id,
@@ -263,7 +310,32 @@ class Orchestrator:
         self.store.record_timeline_event(attempt_id, phase="worker", event_type="started", message=worker_id)
 
         try:
-            allocation = WorktreeManager(self.config.workspace).allocate(repo, issue_number, attempt_id)
+            manager = WorktreeManager(self.config.workspace)
+            allocation_action = self._start_workflow_action(
+                instance_id,
+                attempt_id=attempt_id,
+                transition_name="allocate_workspace",
+                input_data={"repo": repo, "issue_number": issue_number, "attempt_id": attempt_id},
+            )
+            try:
+                allocation = manager.allocate(repo, issue_number, attempt_id)
+            except Exception as exc:
+                self._finish_workflow_action(allocation_action, "failed", error=str(exc))
+                raise
+            self._finish_workflow_action(
+                allocation_action,
+                "succeeded",
+                output_data={
+                    "base_repo_path": allocation.base_repo_path,
+                    "worktree_path": allocation.worktree_path,
+                    "branch": allocation.branch,
+                    "commit_sha": allocation.commit_sha,
+                },
+            )
+            self._transition_workflow_action(
+                allocation_action,
+                data={"worktree_path": allocation.worktree_path, "branch": allocation.branch},
+            )
             self.store.update_attempt_workspace(
                 attempt_id,
                 base_repo_path=allocation.base_repo_path,
@@ -278,6 +350,29 @@ class Orchestrator:
                 message=allocation.worktree_path,
                 data={"branch": allocation.branch, "commit_sha": allocation.commit_sha},
             )
+            setup_action = self._start_workflow_action(
+                instance_id,
+                attempt_id=attempt_id,
+                transition_name="run_setup",
+                input_data={"worktree_path": allocation.worktree_path},
+            )
+            try:
+                setup_results = manager.run_setup(allocation.worktree_path, self.config.setup)
+            except Exception as exc:
+                self._finish_workflow_action(setup_action, "failed", error=str(exc))
+                raise
+            setup_output = {"steps": [asdict(result) for result in setup_results]}
+            blocking_failures = [
+                result for result in setup_results if result.status == "failed" and result.blocks_worker
+            ]
+            if blocking_failures:
+                error = "Blocking setup step failed: " + ", ".join(
+                    result.name for result in blocking_failures
+                )
+                self._finish_workflow_action(setup_action, "failed", output_data=setup_output, error=error)
+                raise WorktreeError(error)
+            self._finish_workflow_action(setup_action, "succeeded", output_data=setup_output)
+            self._transition_workflow_action(setup_action, data=setup_output)
             prompt = build_worker_prompt(
                 self.config,
                 repo,
@@ -286,11 +381,41 @@ class Orchestrator:
                 title,
                 follow_up_context=_format_follow_up_context(self.store.follow_up_source_result(attempt_id)),
             )
-            result = CodexRunner(self.config.codex).run(
-                prompt=prompt,
-                cwd=allocation.worktree_path,
+            codex_transition = "fix_issue" if resolved_task_type == "code" else "research_issue"
+            codex_action = self._start_workflow_action(
+                instance_id,
                 attempt_id=attempt_id,
-                store=self.store,
+                transition_name=codex_transition,
+                input_data={
+                    "repo": repo,
+                    "issue_number": issue_number,
+                    "task_type": resolved_task_type,
+                    "worktree_path": allocation.worktree_path,
+                },
+            )
+            try:
+                result = CodexRunner(self.config.codex).run(
+                    prompt=prompt,
+                    cwd=allocation.worktree_path,
+                    attempt_id=attempt_id,
+                    store=self.store,
+                )
+            except Exception as exc:
+                self._finish_workflow_action(codex_action, "failed", error=str(exc))
+                raise
+            self._finish_workflow_action(
+                codex_action,
+                "succeeded",
+                output_data={
+                    "thread_id": result.thread_id,
+                    "turn_count": result.turn_count,
+                    "duration_ms": result.duration_ms,
+                    "message_chars": len(result.final_message),
+                },
+            )
+            self._transition_workflow_action(
+                codex_action,
+                data={"thread_id": result.thread_id, "turn_count": result.turn_count},
             )
             self.store.record_worker_result(
                 attempt_id=attempt_id,
@@ -307,15 +432,35 @@ class Orchestrator:
                 },
             )
             self.store.record_worker_log(attempt_id, "info", result.final_message)
+            review_action = self._start_workflow_action(
+                instance_id,
+                attempt_id=attempt_id,
+                transition_name="request_review",
+                input_data={"repo": repo, "issue_number": issue_number},
+            )
             self._complete_github_side_effects(
                 attempt_id,
                 repo,
                 issue_number,
                 result.final_message,
             )
+            self._finish_workflow_action(
+                review_action,
+                "succeeded",
+                output_data={
+                    "dry_run": self.config.policy.dry_run,
+                    "review_label": self.config.labels.review,
+                },
+            )
+            self._transition_workflow_action(
+                review_action,
+                data={"dry_run": self.config.policy.dry_run, "attempt_id": attempt_id},
+            )
+            self._open_review_gate(instance_id, resolved_task_type)
             self.store.finish_attempt(attempt_id, "review", "needs_review")
             return attempt_id
         except Exception as exc:
+            self._fail_workflow_instance(instance_id, str(exc))
             self.store.record_error(
                 attempt_id,
                 phase="worker",
@@ -328,6 +473,129 @@ class Orchestrator:
             raise
         finally:
             heartbeat.stop()
+
+    def _workflow_instance_id_for_attempt(self, attempt: sqlite3.Row, *, initial_state: str) -> int:
+        attempt_id = int(attempt["id"])
+        existing = self.store.workflow_instance_for_attempt(attempt_id)
+        if existing:
+            return int(existing["id"])
+        return self.store.create_workflow_instance(
+            repo=str(attempt["repo"]),
+            issue_number=int(attempt["issue_number"]),
+            task_type=str(attempt["task_type"]),
+            workflow_version_id=self.workflow_version_id,
+            initial_state=initial_state,
+            attempt_id=attempt_id,
+        )
+
+    def _transition_from_state(self, transition_name: str, *, fallback: str) -> str:
+        transition = self.config.workflow.transitions.get(transition_name)
+        if not transition:
+            return fallback
+        return transition.from_state
+
+    def _start_workflow_action(
+        self,
+        instance_id: int,
+        *,
+        attempt_id: int | None,
+        transition_name: str,
+        input_data: dict[str, Any] | None = None,
+    ) -> WorkflowActionRuntime | None:
+        transition = self.config.workflow.transitions.get(transition_name)
+        if not transition:
+            return None
+        action_run_id = self.store.start_workflow_action_run(
+            instance_id=instance_id,
+            workflow_version_id=self.workflow_version_id,
+            attempt_id=attempt_id,
+            transition_name=transition_name,
+            action_name=transition.action,
+            input_data=input_data,
+            idempotency_key=_workflow_action_idempotency_key(instance_id, transition_name),
+        )
+        return WorkflowActionRuntime(
+            instance_id=instance_id,
+            attempt_id=attempt_id,
+            action_run_id=action_run_id,
+            transition_name=transition_name,
+            action_name=transition.action,
+            trigger=transition.trigger,
+            from_state=transition.from_state,
+            to_state=transition.to_state,
+        )
+
+    def _finish_workflow_action(
+        self,
+        action: WorkflowActionRuntime | None,
+        status: str,
+        *,
+        output_data: dict[str, Any] | None = None,
+        error: str = "",
+    ) -> None:
+        if not action:
+            return
+        self.store.finish_workflow_action_run(
+            action.action_run_id,
+            status=status,
+            output_data=output_data,
+            error=error,
+        )
+
+    def _transition_workflow_action(
+        self,
+        action: WorkflowActionRuntime | None,
+        *,
+        status: str = "active",
+        data: dict[str, Any] | None = None,
+    ) -> None:
+        if not action:
+            return
+        try:
+            self.store.transition_workflow_instance(
+                action.instance_id,
+                workflow_version_id=self.workflow_version_id,
+                transition_name=action.transition_name,
+                action_name=action.action_name,
+                trigger=action.trigger,
+                from_state=action.from_state,
+                to_state=action.to_state,
+                status=status,
+                data=data,
+            )
+        except ValueError as exc:
+            if action.attempt_id is not None:
+                self.store.record_error(
+                    action.attempt_id,
+                    phase="workflow",
+                    error_type="WorkflowRuntimeError",
+                    message=str(exc),
+                    recoverable=True,
+                )
+
+    def _fail_workflow_instance(self, instance_id: int, message: str) -> None:
+        try:
+            self.store.fail_workflow_instance(
+                instance_id,
+                workflow_version_id=self.workflow_version_id,
+                message=message,
+            )
+        except ValueError:
+            return
+
+    def _open_review_gate(self, instance_id: int, task_type: str) -> None:
+        transition_name = "create_draft_pr" if task_type == "code" else "post_answer"
+        transition = self.config.workflow.transitions.get(transition_name)
+        if not transition or not transition.gate:
+            return
+        self.store.open_workflow_gate(
+            instance_id=instance_id,
+            workflow_version_id=self.workflow_version_id,
+            gate=transition.gate,
+            transition_name=transition_name,
+            state=transition.from_state,
+            prompt=transition.description,
+        )
 
     def _complete_github_side_effects(
         self,
@@ -445,3 +713,7 @@ def _cleanup_summary_with(
         skipped=summary.skipped + skipped,
         errors=summary.errors + errors,
     )
+
+
+def _workflow_action_idempotency_key(instance_id: int, transition_name: str) -> str:
+    return f"workflow:{instance_id}:{transition_name}"
