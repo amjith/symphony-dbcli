@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from symphony_dbcli.config import CodexConfig, WorkflowConfig, default_config
+from symphony_dbcli.config import CodexConfig, WorkflowConfig, WorkspaceConfig, default_config
 from symphony_dbcli.github import GitHubCheckRun, GitHubCiStatus, GitHubComment, GitHubIssue, PullRequest
 from symphony_dbcli.primitive_executor import PrimitiveContext, PrimitiveExecutor
 from symphony_dbcli.store import Store
@@ -156,6 +157,95 @@ def test_fix_ci_failures_runs_codex_with_failed_check_context(tmp_path: Path) ->
     assert detail["result"]["body"] == "Fixed failing CI."
 
 
+def test_record_workspace_changes_reports_changed_files(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    attempt_id, worktree = _seed_attempt(store, tmp_path)
+    _git(worktree, "init")
+    (worktree / "README.md").write_text("start\n", encoding="utf-8")
+    _git(worktree, "add", "README.md")
+    _git(worktree, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
+    base_sha = _git(worktree, "rev-parse", "HEAD")
+    (worktree / "README.md").write_text("changed\n", encoding="utf-8")
+
+    output = (
+        PrimitiveExecutor(default_config(), store, github=FakePrimitiveGitHub())
+        .execute(
+            _context(
+                "workspace.record_changes",
+                attempt_id=attempt_id,
+                worktree_path=str(worktree),
+                input_data={"commit_sha": base_sha},
+            )
+        )
+        .output
+    )
+
+    assert output["has_changes"] is True
+    assert output["changed_files"] == ["README.md"]
+    assert output["uncommitted_files"] == ["README.md"]
+    assert output["base_commit_sha"] == base_sha
+
+
+def test_cleanup_after_merge_removes_managed_worktree(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    bare = tmp_path / "repos" / "litecli.git"
+    worktree = tmp_path / "worktrees" / "litecli"
+    source.mkdir()
+    bare.parent.mkdir()
+    worktree.parent.mkdir()
+    _git(source, "init", "--initial-branch=main")
+    (source / "README.md").write_text("start\n", encoding="utf-8")
+    _git(source, "add", "README.md")
+    _git(source, "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-m", "initial")
+    subprocess.run(["git", "clone", "--bare", str(source), str(bare)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "--git-dir", str(bare), "worktree", "add", str(worktree), "main"],
+        check=True,
+        capture_output=True,
+    )
+    store = _store(tmp_path)
+    attempt_id = _seed_issue_attempt(store, worktree)
+    store.update_attempt_workspace(
+        attempt_id,
+        base_repo_path=str(bare),
+        worktree_path=str(worktree),
+        branch="symphony/dbcli-litecli-245-attempt-1",
+        commit_sha=_git(worktree, "rev-parse", "HEAD"),
+    )
+    store.record_pr(
+        attempt_id,
+        repo="dbcli/litecli",
+        number=12,
+        url="https://github.com/dbcli/litecli/pull/12",
+        title="Fix logging path support",
+        state="closed",
+        merged_at="2026-05-24T14:00:00Z",
+    )
+    config = replace(
+        default_config(),
+        workspace=WorkspaceConfig(root=str(worktree.parent), bare_repos_root=str(bare.parent)),
+    )
+
+    output = (
+        PrimitiveExecutor(config, store, github=FakePrimitiveGitHub())
+        .execute(
+            _context(
+                "workspace.cleanup_after_merge",
+                attempt_id=attempt_id,
+                worktree_path=str(worktree),
+                input_data={"base_repo_path": str(bare)},
+            )
+        )
+        .output
+    )
+
+    detail = store.attempt_detail(attempt_id)
+    assert output == {"worktree_path": str(worktree), "removed": True, "reason": "removed"}
+    assert not worktree.exists()
+    assert detail is not None
+    assert detail["pull_requests"][0]["worktree_cleaned_at"]
+
+
 class FakePrimitiveGitHub:
     def list_issues(self, repo: str, labels: list[str] | None = None) -> list[GitHubIssue]:
         return [self.issue(repo, 245)]
@@ -248,11 +338,16 @@ def _store(tmp_path: Path) -> Store:
 
 
 def _seed_attempt(store: Store, tmp_path: Path) -> tuple[int, Path]:
-    github = FakePrimitiveGitHub()
-    store.upsert_issue(github.issue("dbcli/litecli", 245).snapshot(default_config().labels, "research"))
     worktree = tmp_path / "worktree"
     worktree.mkdir()
-    attempt_id = store.create_attempt(
+    attempt_id = _seed_issue_attempt(store, worktree)
+    return attempt_id, worktree
+
+
+def _seed_issue_attempt(store: Store, worktree: Path) -> int:
+    github = FakePrimitiveGitHub()
+    store.upsert_issue(github.issue("dbcli/litecli", 245).snapshot(default_config().labels, "research"))
+    return store.create_attempt(
         repo="dbcli/litecli",
         issue_number=245,
         task_type="code",
@@ -260,7 +355,6 @@ def _seed_attempt(store: Store, tmp_path: Path) -> tuple[int, Path]:
         worktree_path=str(worktree),
         status="running",
     )
-    return attempt_id, worktree
 
 
 def _config_with_fake_codex(tmp_path: Path, prompt_path: Path, message: str) -> WorkflowConfig:
@@ -282,3 +376,8 @@ def _config_with_fake_codex(tmp_path: Path, prompt_path: Path, message: str) -> 
         default_config(),
         codex=CodexConfig(command=str(command), transport="exec"),
     )
+
+
+def _git(path: Path, *args: str) -> str:
+    result = subprocess.run(["git", "-C", str(path), *args], text=True, capture_output=True, check=True)
+    return result.stdout.strip()

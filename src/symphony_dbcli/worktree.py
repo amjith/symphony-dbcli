@@ -33,6 +33,17 @@ class WorktreeRemoval:
 
 
 @dataclass(frozen=True)
+class WorkspaceChangeSummary:
+    worktree_path: str
+    base_commit_sha: str
+    head_commit_sha: str
+    changed_files: list[str]
+    uncommitted_files: list[str]
+    commit_count: int
+    has_changes: bool
+
+
+@dataclass(frozen=True)
 class SetupStepResult:
     name: str
     command: list[str]
@@ -123,6 +134,24 @@ class WorktreeManager:
         self._run(["git", "--git-dir", str(base), "worktree", "remove", str(path)])
         self._run(["git", "--git-dir", str(base), "worktree", "prune"], check=False)
         return WorktreeRemoval(worktree_path=worktree_path, removed=True, reason="removed")
+
+    def record_changes(self, *, worktree_path: str, base_commit_sha: str) -> WorkspaceChangeSummary:
+        path = Path(worktree_path)
+        if not worktree_path or not path.exists():
+            raise WorktreeError(f"Workspace does not exist: {worktree_path}")
+        head_sha = self._run(["git", "-C", str(path), "rev-parse", "HEAD"]).stdout.strip()
+        committed_files = self._committed_changed_files(path, base_commit_sha)
+        uncommitted_files = self._status_files(path)
+        changed_files = sorted(set(committed_files) | set(uncommitted_files))
+        return WorkspaceChangeSummary(
+            worktree_path=worktree_path,
+            base_commit_sha=base_commit_sha,
+            head_commit_sha=head_sha,
+            changed_files=changed_files,
+            uncommitted_files=uncommitted_files,
+            commit_count=self._commit_count(path, base_commit_sha),
+            has_changes=bool(changed_files) or (bool(base_commit_sha) and head_sha != base_commit_sha),
+        )
 
     def run_setup(self, worktree_path: str, setup: SetupConfig) -> list[SetupStepResult]:
         if not setup.enabled:
@@ -234,6 +263,30 @@ class WorktreeManager:
             raise WorktreeError(result.stderr.strip() or "git command failed")
         return result
 
+    def _committed_changed_files(self, path: Path, base_commit_sha: str) -> list[str]:
+        if not base_commit_sha:
+            return []
+        result = self._run(
+            ["git", "-C", str(path), "diff", "--name-only", f"{base_commit_sha}...HEAD"],
+            check=False,
+        )
+        if result.returncode != 0:
+            result = self._run(
+                ["git", "-C", str(path), "diff", "--name-only", f"{base_commit_sha}..HEAD"],
+                check=False,
+            )
+        return sorted(line for line in result.stdout.splitlines() if line)
+
+    def _status_files(self, path: Path) -> list[str]:
+        result = self._run(["git", "-C", str(path), "status", "--porcelain"])
+        return sorted(_porcelain_path(line) for line in result.stdout.splitlines() if line)
+
+    def _commit_count(self, path: Path, base_commit_sha: str) -> int:
+        if not base_commit_sha:
+            return 0
+        result = self._run(["git", "-C", str(path), "rev-list", "--count", f"{base_commit_sha}..HEAD"])
+        return int(result.stdout.strip() or "0")
+
 
 def safe_key(value: str) -> str:
     cleaned = SAFE_RE.sub("_", value.strip()).strip("_")
@@ -252,3 +305,10 @@ def _timeout_output(value: str | bytes | None) -> str:
     if isinstance(value, bytes):
         return value.decode(errors="replace")
     return value
+
+
+def _porcelain_path(line: str) -> str:
+    path = line[3:]
+    if " -> " in path:
+        return path.rsplit(" -> ", 1)[1]
+    return path

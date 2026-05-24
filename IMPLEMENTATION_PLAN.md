@@ -405,17 +405,15 @@ those primitives are composed into automatic transitions and human-gated steps.
   Progress: all listed Codex primitives now execute through the primitive
   layer and store worker results in SQLite regardless of dry-run mode. The PR
   review and CI variants include fetched workflow context in the Codex prompt.
-- [ ] Implement workspace primitives: `workspace.allocate`,
+- [x] Implement workspace primitives: `workspace.allocate`,
   `workspace.run_setup`, `workspace.record_changes`, and
   `workspace.cleanup_after_merge`. The first implementation should support the
   existing worktree strategy; a clone strategy should share the same primitive
   contract once added. Setup execution should capture command, duration, exit
   status, stdout/stderr excerpts, and whether failure blocks the worker.
-  Progress: `workspace.allocate` and `workspace.run_setup` now execute through
-  dedicated primitives and record workflow action runs. Setup output captures
-  command, duration, exit status, stdout/stderr excerpts, and blocking
-  failures. `workspace.record_changes`, cleanup-as-primitive, and clone support
-  remain.
+  Progress: all listed worktree-backed workspace primitives now execute through
+  the primitive layer and record workflow action outputs/artifacts. Clone
+  strategy support remains a future strategy extension.
 - [ ] Add workspace strategy configuration and validation. The dashboard and
   CLI should clearly show whether new tasks start from git worktrees or full
   clones, which branch policy is active, and where cleanup will happen.

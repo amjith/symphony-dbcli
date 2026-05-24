@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol, cast
 
@@ -113,6 +114,10 @@ class PrimitiveExecutor:
             return self._allocate_workspace(context)
         if context.transition.action == "workspace.run_setup":
             return self._run_setup(context)
+        if context.transition.action == "workspace.record_changes":
+            return self._record_workspace_changes(context)
+        if context.transition.action == "workspace.cleanup_after_merge":
+            return self._cleanup_after_merge(context)
         if context.transition.action in {
             "codex.research_issue",
             "codex.fix_issue",
@@ -235,6 +240,63 @@ class PrimitiveExecutor:
             names = ", ".join(result.name for result in blocking_failures)
             raise PrimitiveExecutionError(f"Blocking setup step failed: {names}", output=output)
         return PrimitiveOutcome(output)
+
+    def _record_workspace_changes(self, context: PrimitiveContext) -> PrimitiveOutcome:
+        attempt_id = _required_attempt_id(context)
+        worktree_path = _context_or_input_str(context, "worktree_path")
+        base_commit_sha = _context_or_input_str(context, "commit_sha")
+        summary = WorktreeManager(self.config.workspace).record_changes(
+            worktree_path=worktree_path,
+            base_commit_sha=base_commit_sha,
+        )
+        self.store.record_timeline_event(
+            attempt_id,
+            phase="worktree",
+            event_type="changes_recorded",
+            message=f"{len(summary.changed_files)} changed file(s)",
+            data=asdict(summary),
+        )
+        return PrimitiveOutcome(
+            {
+                "changed_files": summary.changed_files,
+                "uncommitted_files": summary.uncommitted_files,
+                "commit_sha": summary.head_commit_sha,
+                "head_commit_sha": summary.head_commit_sha,
+                "base_commit_sha": summary.base_commit_sha,
+                "commit_count": summary.commit_count,
+                "has_changes": summary.has_changes,
+                "worktree_path": summary.worktree_path,
+            }
+        )
+
+    def _cleanup_after_merge(self, context: PrimitiveContext) -> PrimitiveOutcome:
+        attempt_id = _required_attempt_id(context)
+        pull_request = _pull_request_for_cleanup(self.store, attempt_id, context.input_data)
+        if not str(pull_request["merged_at"] or ""):
+            return PrimitiveOutcome(
+                {
+                    "removed": False,
+                    "reason": "pull_request_not_merged",
+                    "worktree_path": _context_or_input_str(context, "worktree_path"),
+                }
+            )
+        try:
+            removal = WorktreeManager(self.config.workspace).remove_worktree(
+                base_repo_path=_context_or_input_str(context, "base_repo_path"),
+                worktree_path=_context_or_input_str(context, "worktree_path"),
+            )
+        except Exception as exc:
+            self.store.mark_pull_request_worktree_cleanup_failed(int(pull_request["id"]), str(exc))
+            raise PrimitiveExecutionError(str(exc)) from exc
+        self.store.mark_pull_request_worktree_cleaned(int(pull_request["id"]))
+        self.store.record_timeline_event(
+            attempt_id,
+            phase="worktree",
+            event_type="cleaned_after_pr_merge",
+            message=removal.worktree_path,
+            data=asdict(removal),
+        )
+        return PrimitiveOutcome(asdict(removal))
 
     def _run_codex(self, context: PrimitiveContext) -> PrimitiveOutcome:
         attempt_id = _required_attempt_id(context)
@@ -368,6 +430,31 @@ def _required_str(data: dict[str, Any], key: str) -> str:
     if not value:
         raise PrimitiveExecutionError(f"Primitive input '{key}' is required.")
     return value
+
+
+def _context_or_input_str(context: PrimitiveContext, key: str) -> str:
+    context_value = getattr(context, key)
+    value = str(context.input_data.get(key) or context_value or "").strip()
+    if not value:
+        raise PrimitiveExecutionError(f"Primitive input '{key}' is required.")
+    return value
+
+
+def _pull_request_for_cleanup(
+    store: Store,
+    attempt_id: int,
+    input_data: dict[str, Any],
+) -> sqlite3.Row:
+    pull_request_id = input_data.get("pull_request_id")
+    pull_requests = store.pull_requests_for_attempt(attempt_id)
+    if pull_request_id:
+        for pull_request in pull_requests:
+            if int(pull_request["id"]) == int(pull_request_id):
+                return pull_request
+        raise PrimitiveExecutionError(f"Pull request row {pull_request_id} does not belong to this attempt.")
+    if not pull_requests:
+        raise PrimitiveExecutionError("Attempt does not have a recorded pull request.")
+    return pull_requests[0]
 
 
 def _codex_task_context(context: PrimitiveContext) -> str:

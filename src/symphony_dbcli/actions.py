@@ -262,7 +262,18 @@ def default_action_registry() -> ActionRegistry:
             human_gate_allowed=False,
             description="Record changed files, commits, and branch metadata for an attempt.",
             input_fields=frozenset({"attempt_id", "worktree_path", "branch", "commit_sha"}),
-            output_fields=frozenset({"changed_files", "commit_sha", "has_changes"}),
+            output_fields=frozenset(
+                {
+                    "changed_files",
+                    "uncommitted_files",
+                    "commit_sha",
+                    "head_commit_sha",
+                    "base_commit_sha",
+                    "commit_count",
+                    "has_changes",
+                    "worktree_path",
+                }
+            ),
         ),
         PrimitiveSpec(
             name="workspace.cleanup_after_merge",
@@ -273,7 +284,7 @@ def default_action_registry() -> ActionRegistry:
             automatic_allowed=True,
             human_gate_allowed=True,
             description="Remove an attempt workspace after its pull request has merged.",
-            input_fields=frozenset({"pull_request_id", "base_repo_path", "worktree_path"}),
+            input_fields=frozenset({"attempt_id", "pull_request_id", "base_repo_path", "worktree_path"}),
             output_fields=frozenset({"removed", "reason", "worktree_path"}),
         ),
     ]
