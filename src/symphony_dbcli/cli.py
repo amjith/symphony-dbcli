@@ -21,7 +21,7 @@ from .config import (
     write_workflow,
 )
 from .dashboard import DashboardState, serve_dashboard
-from .e2e import DEFAULT_FIXTURE_REPO, E2EFixtureConfig, run_fixture
+from .e2e import DEFAULT_FIXTURE_REPO, E2EFixtureConfig, fixture_scenarios, run_fixture
 from .env import load_local_env, parse_env_file
 from .github import GitHubClient
 from .github_app import default_manifest, write_manifest_form
@@ -128,7 +128,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_fixture_parser.add_argument("--repo", default=DEFAULT_FIXTURE_REPO)
     run_fixture_parser.add_argument("--root", default=".symphony/e2e")
-    run_fixture_parser.add_argument("--task-type", choices=["code", "research"], default="code")
+    run_fixture_parser.add_argument("--scenario", choices=fixture_scenarios(), default="code_happy_path")
+    run_fixture_parser.add_argument("--task-type", choices=["code", "research"], default="")
     run_fixture_parser.add_argument(
         "--no-create-pr",
         action="store_true",
@@ -320,6 +321,7 @@ def cmd_e2e_run_fixture(args: argparse.Namespace) -> int:
             task_type=str(args.task_type),
             create_pr=not bool(args.no_create_pr),
             reset_open_todo=not bool(args.keep_existing_todo),
+            scenario=str(args.scenario),
         )
     )
     print(f"issue={result.issue_url}")

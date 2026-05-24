@@ -24,8 +24,10 @@ from .config import (
 )
 from .github import GitHubClient, GitHubError
 from .orchestrator import Orchestrator, load_and_record_workflow
+from .primitive_executor import PrimitiveContext, PrimitiveExecutor
 from .review_actions import ReviewActions
 from .store import Store
+from .workflow_definition import WorkflowTransitionConfig
 from .worktree import safe_key
 
 DEFAULT_FIXTURE_REPO = "amjith/symphony-dbcli-e2e-fixture"
@@ -33,12 +35,46 @@ FIXTURE_TITLE_PREFIX = "Symphony e2e"
 
 
 @dataclass(frozen=True)
+class FixtureScenario:
+    task_type: str
+    create_pr: bool
+    description: str
+    create_code_follow_up: bool = False
+    codex_follow_up_action: str = ""
+
+
+FIXTURE_SCENARIOS = {
+    "code_happy_path": FixtureScenario("code", True, "Code issue through draft PR creation."),
+    "research_answer_review": FixtureScenario("research", False, "Research answer through human review."),
+    "research_to_code_follow_up": FixtureScenario(
+        "research",
+        True,
+        "Research answer followed by a code task and draft PR.",
+        create_code_follow_up=True,
+    ),
+    "pr_review_comments": FixtureScenario(
+        "code",
+        True,
+        "Code issue followed by PR review comment handling.",
+        codex_follow_up_action="codex.address_pr_comments",
+    ),
+    "ci_failure_fix": FixtureScenario(
+        "code",
+        True,
+        "Code issue followed by CI failure repair.",
+        codex_follow_up_action="codex.fix_ci_failures",
+    ),
+}
+
+
+@dataclass(frozen=True)
 class E2EFixtureConfig:
     repo: str = DEFAULT_FIXTURE_REPO
     root: Path = Path(".symphony/e2e")
-    task_type: str = "code"
+    task_type: str = ""
     create_pr: bool = True
     reset_open_todo: bool = True
+    scenario: str = "code_happy_path"
 
 
 @dataclass(frozen=True)
@@ -49,13 +85,21 @@ class E2EFixtureResult:
     database_path: Path
     worktree_path: str
     pull_request_url: str = ""
+    follow_up_attempt_id: int | None = None
+    scenario: str = "code_happy_path"
 
 
 class E2EFixtureError(RuntimeError):
     """Raised when the GitHub-backed e2e fixture cannot run."""
 
 
+def fixture_scenarios() -> list[str]:
+    return list(FIXTURE_SCENARIOS)
+
+
 def run_fixture(config: E2EFixtureConfig) -> E2EFixtureResult:
+    config = _resolve_scenario(config)
+    scenario = FIXTURE_SCENARIOS[config.scenario]
     _ensure_github_token()
     paths = _fixture_paths(config)
     paths.root.mkdir(parents=True, exist_ok=True)
@@ -83,18 +127,30 @@ def run_fixture(config: E2EFixtureConfig) -> E2EFixtureResult:
         raise E2EFixtureError("The fixture claimed an unexpected issue; rerun with a clean fixture repo.")
     orchestrator.run_attempt(attempt_id)
 
+    target_attempt_id = attempt_id
+    follow_up_attempt_id = None
+    if scenario.create_code_follow_up:
+        follow_up_attempt_id = store.create_code_follow_up_attempt(attempt_id, workflow_version_id)
+        orchestrator.run_attempt(follow_up_attempt_id)
+        target_attempt_id = follow_up_attempt_id
+
     pull_request_url = ""
-    if config.create_pr and config.task_type == "code":
+    target_attempt = store.attempt_by_id(target_attempt_id)
+    if config.create_pr and target_attempt and str(target_attempt["task_type"]) == "code":
         pull_request_url = (
             ReviewActions(
                 workflow_config,
                 store,
                 github=_E2EGitHubClient(workflow_config.github),
             )
-            .create_draft_pr(attempt_id)
+            .create_draft_pr(target_attempt_id)
             .url
         )
-    completed_attempt = store.attempt_by_id(attempt_id)
+    if scenario.codex_follow_up_action and pull_request_url:
+        _run_codex_follow_up_action(
+            workflow_config, store, target_attempt_id, scenario.codex_follow_up_action
+        )
+    completed_attempt = store.attempt_by_id(target_attempt_id)
     worktree_path = str(completed_attempt["worktree_path"]) if completed_attempt else ""
     return E2EFixtureResult(
         issue_url=issue_url,
@@ -103,6 +159,8 @@ def run_fixture(config: E2EFixtureConfig) -> E2EFixtureResult:
         database_path=paths.database,
         worktree_path=worktree_path,
         pull_request_url=pull_request_url,
+        follow_up_attempt_id=follow_up_attempt_id,
+        scenario=config.scenario,
     )
 
 
@@ -144,7 +202,23 @@ def _fixture_paths(config: E2EFixtureConfig) -> _FixturePaths:
     )
 
 
+def _resolve_scenario(config: E2EFixtureConfig) -> E2EFixtureConfig:
+    if config.scenario not in FIXTURE_SCENARIOS:
+        names = ", ".join(fixture_scenarios())
+        raise E2EFixtureError(f"Unknown e2e fixture scenario {config.scenario!r}; choose one of {names}.")
+    scenario = FIXTURE_SCENARIOS[config.scenario]
+    return E2EFixtureConfig(
+        repo=config.repo,
+        root=config.root,
+        task_type=config.task_type or scenario.task_type,
+        create_pr=config.create_pr and scenario.create_pr,
+        reset_open_todo=config.reset_open_todo,
+        scenario=config.scenario,
+    )
+
+
 def _workflow_config(config: E2EFixtureConfig, paths: _FixturePaths) -> WorkflowConfig:
+    config = _resolve_scenario(config)
     return WorkflowConfig(
         profile=ProfileConfig(active="e2e"),
         github=GitHubConfig(
@@ -178,6 +252,73 @@ def _workflow_config(config: E2EFixtureConfig, paths: _FixturePaths) -> Workflow
             "run the local unittest suite, and summarize the result succinctly."
         ),
     )
+
+
+def _run_codex_follow_up_action(
+    config: WorkflowConfig,
+    store: Store,
+    attempt_id: int,
+    action: str,
+) -> None:
+    attempt = store.attempt_by_id(attempt_id)
+    if not attempt:
+        raise E2EFixtureError(f"Attempt {attempt_id} does not exist.")
+    issue = store.issue_detail(str(attempt["repo"]), int(attempt["issue_number"]))
+    pull_requests = store.pull_requests_for_attempt(attempt_id)
+    if not pull_requests:
+        raise E2EFixtureError(f"Attempt {attempt_id} does not have a pull request for {action}.")
+    transition_name = action.removeprefix("codex.")
+    pull_request_number = int(pull_requests[0]["number"])
+    PrimitiveExecutor(config, store).execute(
+        PrimitiveContext(
+            instance_id=0,
+            transition_name=transition_name,
+            transition=WorkflowTransitionConfig(
+                from_state="fixture",
+                to_state="fixture",
+                action=action,
+                guidance=["Keep the fixture follow-up focused and fast."],
+            ),
+            repo=str(attempt["repo"]),
+            issue_number=int(attempt["issue_number"]),
+            task_type=str(attempt["task_type"]),
+            issue_title="" if not issue else str(issue["issue"]["title"]),
+            attempt_id=attempt_id,
+            base_repo_path=str(attempt["base_repo_path"] or ""),
+            worktree_path=str(attempt["worktree_path"] or ""),
+            branch=str(attempt["branch"] or ""),
+            commit_sha=str(attempt["commit_sha"] or ""),
+            input_data=_codex_follow_up_input(action, pull_request_number),
+        )
+    )
+
+
+def _codex_follow_up_input(action: str, pull_request_number: int) -> dict[str, Any]:
+    if action == "codex.address_pr_comments":
+        return {
+            "pull_request_number": pull_request_number,
+            "comments": [
+                {
+                    "author": "symphony-fixture",
+                    "body": "Please confirm the fixture test suite still passes.",
+                    "url": "",
+                }
+            ],
+        }
+    if action == "codex.fix_ci_failures":
+        return {
+            "pull_request_number": pull_request_number,
+            "failed_checks": [
+                {
+                    "name": "fixture-tests",
+                    "status": "completed",
+                    "conclusion": "failure",
+                    "url": "",
+                }
+            ],
+            "checks": [],
+        }
+    return {"pull_request_number": pull_request_number}
 
 
 def _write_fixture_workflow(path: Path, config: WorkflowConfig) -> None:

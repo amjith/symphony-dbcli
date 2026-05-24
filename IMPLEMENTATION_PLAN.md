@@ -466,19 +466,27 @@ those primitives are composed into automatic transitions and human-gated steps.
   automatic transitions, human gates, terminal states, and the current runtime
   position of active issues so users can verify the workflow intention before
   and while it runs.
-- [ ] Recreate the current behavior as the default workflow in `WORKFLOW.md`:
+- [x] Recreate the current behavior as the default workflow in `WORKFLOW.md`:
   fetch labeled issues, claim work, allocate a worktree, run Codex, store the
   result, move to human review, optionally post a reply or create a draft PR,
   and clean up the worktree after PR merge.
-  Progress: the default workflow is now encoded in `WORKFLOW.md`. Runtime still
-  needs to execute the whole flow through generic workflow dispatch rather than
-  a mostly hardcoded orchestrator.
-- [ ] Add fixture workflows under the e2e harness for fast iteration: code
+  Progress: the default workflow is encoded in `WORKFLOW.md` and the runtime
+  executes the claim, workspace, Codex, review, PR/comment, and cleanup path via
+  workflow transitions and primitives.
+- [x] Add fixture workflows under the e2e harness for fast iteration: code
   happy path, research answer review, research-to-code follow-up, PR review
   comments addressed by Codex, and CI failure fixed by Codex.
-- [ ] Add end-to-end tests that execute workflow files against
+  Progress: the e2e harness exposes named scenarios for each fixture workflow
+  shape so local and GitHub-backed runs can select them quickly from the CLI;
+  follow-up scenarios queue code tasks or run the relevant Codex PR/CI
+  primitive after the draft PR path.
+- [x] Add end-to-end tests that execute workflow files against
   `amjith/symphony-dbcli-e2e-fixture` and assert state transitions, stored
   artifacts, labels, comments, draft PRs, and cleanup behavior.
+  Progress: pytest now includes an opt-in GitHub-backed fixture test guarded by
+  `SYMPHONY_RUN_GITHUB_E2E=1`; normal local runs keep fast unit coverage while
+  the live fixture path exercises the real repository, workflow file, issue,
+  worker, and draft PR flow.
 - [x] Keep compatibility with the existing dashboard, CLI, and SQLite data
   where practical. Add migrations for the new workflow runtime tables instead
   of rewriting existing attempt, worker, comment, and PR history.

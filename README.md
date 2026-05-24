@@ -138,12 +138,21 @@ without touching DBCLI repos:
 
 ```bash
 uv run symphony-dbcli e2e run-fixture
+uv run symphony-dbcli e2e run-fixture --scenario research_to_code_follow_up
 ```
 
 The harness targets `amjith/symphony-dbcli-e2e-fixture`, creates a labeled issue,
 polls and claims it, allocates a worktree, runs a deterministic fake Codex
-worker, stores the result in SQLite, and opens a draft PR unless
-`--no-create-pr` is passed. Generated workflow files, databases, fake worker
-binaries, and worktrees live under `.symphony/e2e/`. The fixture expects `gh`
-to be authenticated with repo access and uses local SSH git auth for the fixture
-branch push.
+worker, stores the result in SQLite, and opens a draft PR for code-path
+scenarios unless `--no-create-pr` is passed. Scenarios include
+`code_happy_path`, `research_answer_review`, `research_to_code_follow_up`,
+`pr_review_comments`, and `ci_failure_fix`.
+
+Generated workflow files, databases, fake worker binaries, and worktrees live
+under `.symphony/e2e/`. The fixture expects `gh` to be authenticated with repo
+access and uses local SSH git auth for the fixture branch push. To run the live
+pytest fixture, opt in explicitly:
+
+```bash
+SYMPHONY_RUN_GITHUB_E2E=1 uv run pytest tests/test_e2e.py
+```
