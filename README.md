@@ -130,3 +130,20 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy
 ```
+
+## End-to-End Fixture
+
+Use the disposable fixture repo to exercise the GitHub-backed orchestration loop
+without touching DBCLI repos:
+
+```bash
+uv run symphony-dbcli e2e run-fixture
+```
+
+The harness targets `amjith/symphony-dbcli-e2e-fixture`, creates a labeled issue,
+polls and claims it, allocates a worktree, runs a deterministic fake Codex
+worker, stores the result in SQLite, and opens a draft PR unless
+`--no-create-pr` is passed. Generated workflow files, databases, fake worker
+binaries, and worktrees live under `.symphony/e2e/`. The fixture expects `gh`
+to be authenticated with repo access and uses local SSH git auth for the fixture
+branch push.

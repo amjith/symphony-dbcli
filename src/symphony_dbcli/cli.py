@@ -21,6 +21,7 @@ from .config import (
     write_workflow,
 )
 from .dashboard import DashboardState, serve_dashboard
+from .e2e import DEFAULT_FIXTURE_REPO, E2EFixtureConfig, run_fixture
 from .env import load_local_env, parse_env_file
 from .github import GitHubClient
 from .github_app import default_manifest, write_manifest_form
@@ -118,6 +119,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Retry pull request worktree cleanups that previously failed",
     )
     cleanup_merged_prs.set_defaults(func=cmd_worktree_cleanup_merged_prs)
+
+    e2e = subcommands.add_parser("e2e", help="GitHub-backed end-to-end fixture tools")
+    e2e_sub = e2e.add_subparsers(required=True)
+    run_fixture_parser = e2e_sub.add_parser(
+        "run-fixture",
+        help="Create a fixture issue, dispatch it, run the worker, and optionally open a draft PR",
+    )
+    run_fixture_parser.add_argument("--repo", default=DEFAULT_FIXTURE_REPO)
+    run_fixture_parser.add_argument("--root", default=".symphony/e2e")
+    run_fixture_parser.add_argument("--task-type", choices=["code", "research"], default="code")
+    run_fixture_parser.add_argument(
+        "--no-create-pr",
+        action="store_true",
+        help="Stop after the worker reaches review instead of creating a draft PR",
+    )
+    run_fixture_parser.add_argument(
+        "--keep-existing-todo",
+        action="store_true",
+        help="Do not remove symphony:todo from existing open fixture issues before creating a new one",
+    )
+    run_fixture_parser.set_defaults(func=cmd_e2e_run_fixture)
 
     github_app = subcommands.add_parser("github-app", help="GitHub App setup commands")
     github_app_sub = github_app.add_subparsers(required=True)
@@ -279,6 +301,26 @@ def cmd_worktree_cleanup_merged_prs(args: argparse.Namespace) -> int:
             ]
         )
     )
+    return 0
+
+
+def cmd_e2e_run_fixture(args: argparse.Namespace) -> int:
+    result = run_fixture(
+        E2EFixtureConfig(
+            repo=str(args.repo),
+            root=Path(str(args.root)),
+            task_type=str(args.task_type),
+            create_pr=not bool(args.no_create_pr),
+            reset_open_todo=not bool(args.keep_existing_todo),
+        )
+    )
+    print(f"issue={result.issue_url}")
+    print(f"attempt={result.attempt_id}")
+    print(f"workflow={result.workflow_path}")
+    print(f"database={result.database_path}")
+    print(f"worktree={result.worktree_path}")
+    if result.pull_request_url:
+        print(f"pull_request={result.pull_request_url}")
     return 0
 
 

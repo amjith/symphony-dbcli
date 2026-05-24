@@ -292,6 +292,48 @@ Add focused tests for:
 Before enabling the three DBCLI repos, run an end-to-end dry run against a test
 GitHub repository.
 
+## End-to-End Fixture Harness
+
+Use `amjith/symphony-dbcli-e2e-fixture` as the disposable GitHub repository for
+live orchestration tests. The repository intentionally contains a tiny Python
+module with a failing `fixture_calc.add()` implementation plus a GitHub Actions
+workflow that runs `python -m unittest discover -v`.
+
+The local harness is exposed as:
+
+```bash
+uv run symphony-dbcli e2e run-fixture
+```
+
+The harness is optimized for fast workflow iteration:
+
+- Generates an isolated `WORKFLOW.md`, SQLite database, worktree root, and fake
+  Codex executable under `.symphony/e2e/`.
+- Forces token-based GitHub API auth for the fixture run so local GitHub App
+  config for DBCLI repos does not accidentally route writes to the wrong
+  installation.
+- Uses local SSH git auth for fixture branch pushes, matching the `gh` git
+  protocol used to seed the repository.
+- Ensures the Symphony labels exist on the fixture repo.
+- Clears stale `symphony:todo` labels from open fixture issues by default so the
+  next run claims exactly the newly created issue.
+- Creates a fresh GitHub issue labeled `symphony:todo` and
+  `symphony:type:code` or `symphony:type:research`.
+- Runs the real poll, claim, worktree allocation, worker execution, result
+  recording, label transition, review action, branch push, and draft PR
+  creation path.
+- Uses a deterministic fake Codex command in `codex.transport = "exec"` mode so
+  the loop is fast and repeatable before spending real Codex turns.
+
+This fixture becomes the primary experimentation surface for the next workflow
+architecture iteration. The codebase should expose action primitives such as
+`github.fetch_issues`, `github.fetch_comments`, `codex.research_issue`,
+`codex.fix_issue`, `github.create_draft_pr`, `github.fetch_ci_status`,
+`codex.fix_ci_failures`, and `codex.address_pr_comments`; `WORKFLOW.md` should
+compose those primitives into state machines with explicit automatic
+transitions and human gates. New workflow engine behavior should be validated
+first against this fixture repository, then against DBCLI repositories.
+
 ## Assumptions
 
 - Initial scope is exactly `dbcli/pgcli`, `dbcli/mycli`, and `dbcli/litecli`.
