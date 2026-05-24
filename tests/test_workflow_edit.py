@@ -32,6 +32,19 @@ def test_render_workflow_edit_shows_diff_and_apply_control() -> None:
     html = render_workflow_edit(proposal=proposal)
 
     assert "Workflow Edit" in html
+    assert "Workflow Flowchart" in html
+    assert "workflow-flowchart" in html
+    assert "create_draft_pr" in html
     assert "Proposed diff" in html
     assert "Keep support replies under two sentences." in html
     assert 'name="action" value="apply"' in html
+
+
+def test_render_workflow_edit_hides_flowchart_for_invalid_workflow() -> None:
+    current = render_workflow(default_config())
+    proposal = validate_workflow_edit(current, "not a workflow", "break it")
+
+    html = render_workflow_edit(proposal=proposal)
+
+    assert "workflow-flowchart" not in html
+    assert "Valid WORKFLOW.md required to render the flowchart." in html

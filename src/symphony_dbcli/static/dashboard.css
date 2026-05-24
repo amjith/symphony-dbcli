@@ -444,6 +444,113 @@ a {
   gap: 8px;
 }
 
+.workflow-flowchart {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.workflow-flowchart svg {
+  display: block;
+}
+
+.workflow-flow-edge path {
+  fill: none;
+  stroke: #8d98a8;
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.workflow-flow-edge.is-human path {
+  stroke: #aa7a1e;
+  stroke-dasharray: 6 5;
+}
+
+.workflow-flow-edge.is-backward path {
+  stroke-dasharray: 3 6;
+}
+
+.workflow-flow-edge.is-human.is-backward path {
+  stroke-dasharray: 7 5 3 5;
+}
+
+.workflow-flow-edge text {
+  fill: #485365;
+  font-size: 11px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: #fbfcfd;
+  stroke-linejoin: round;
+  stroke-width: 5px;
+}
+
+.workflow-flow-edge.is-human text {
+  fill: #76550f;
+}
+
+.workflow-flow-arrowhead {
+  fill: #8d98a8;
+}
+
+.workflow-flow-arrowhead-human {
+  fill: #aa7a1e;
+}
+
+.workflow-flow-node rect {
+  fill: #ffffff;
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.workflow-flow-node.is-initial rect {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.workflow-flow-node.is-terminal rect {
+  fill: #f1f3f6;
+  stroke: #9aa4b2;
+}
+
+.workflow-flow-node.has-gate rect {
+  stroke: #c79532;
+}
+
+.workflow-flow-node.has-active rect {
+  fill: #f4fbf7;
+}
+
+.workflow-flow-node-title,
+.workflow-flow-node-count,
+.workflow-flow-node-desc,
+.workflow-flow-node-meta {
+  pointer-events: none;
+}
+
+.workflow-flow-node-title {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.workflow-flow-node-count {
+  fill: var(--accent);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.workflow-flow-node-desc {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.workflow-flow-node-meta {
+  fill: #556070;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
 .workflow-edit-form {
   display: grid;
   gap: 14px;

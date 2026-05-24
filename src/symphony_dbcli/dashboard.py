@@ -20,6 +20,7 @@ from .orchestrator import Orchestrator, OrchestratorError
 from .review_actions import DraftPullRequestContent, build_draft_pr_content
 from .store import Store
 from .workflow_edit import WorkflowEditProposal, parsed_config, propose_workflow_edit, validate_workflow_edit
+from .workflow_visualization import WorkflowFlowchartView
 
 
 @dataclass(frozen=True)
@@ -253,12 +254,14 @@ def render_workflow_edit(
     proposal: WorkflowEditProposal,
     applied: bool = False,
 ) -> str:
+    workflow_chart = _workflow_chart_for_proposal(proposal)
     return (
         _templates()
         .get_template("workflow_edit.html")
         .render(
             title="Edit Workflow",
             proposal=proposal,
+            workflow_chart=workflow_chart,
             applied=applied,
         )
     )
@@ -287,6 +290,15 @@ def _draft_pr_content(detail: dict[str, Any] | None) -> DraftPullRequestContent 
         int(detail["attempt"]["issue_number"]),
         str(result["body"] or ""),
     )
+
+
+def _workflow_chart_for_proposal(proposal: WorkflowEditProposal) -> WorkflowFlowchartView | None:
+    if not proposal.valid:
+        return None
+    try:
+        return WorkflowFlowchartView.from_definition(parsed_config(proposal.proposed_content).workflow)
+    except WorkflowError:
+        return None
 
 
 def _handler_factory(store: Store, state: DashboardState) -> type[BaseHTTPRequestHandler]:
