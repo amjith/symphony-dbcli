@@ -21,6 +21,7 @@ def test_dashboard_uses_static_css(tmp_path: Path) -> None:
     html = render_index(store)
 
     assert '<link rel="stylesheet" href="/static/dashboard.css"' in html
+    assert '<script src="/static/dashboard.js" defer></script>' in html
     assert "<style>" not in html
     assert "Recent Attempts" in html
     assert "Dry Run" in html
@@ -28,6 +29,8 @@ def test_dashboard_uses_static_css(tmp_path: Path) -> None:
     assert "Start queued work automatically" in html
     assert 'role="switch"' in html
     assert 'aria-checked="true"' in html
+    assert 'form action="/" method="get" data-ask-form' in html
+    assert "data-ask-answer" in html
 
 
 def test_dashboard_shows_worker_auto_start_off(tmp_path: Path) -> None:
@@ -110,6 +113,25 @@ def test_dashboard_shows_live_mode_when_dry_run_is_disabled(tmp_path: Path) -> N
     assert "Dry Run" in html
     assert "Off" in html
     assert "prod profile" in html
+
+
+def test_dashboard_shows_inline_ask_answer_with_detail_links(tmp_path: Path) -> None:
+    store = Store(tmp_path / "symphony.db")
+    store.init()
+    _seed_issue(store)
+    attempt_id = store.create_attempt(
+        repo="dbcli/litecli",
+        issue_number=245,
+        task_type="research",
+        workflow_version_id=None,
+    )
+
+    html = render_index(store, ask_question="How long did issue #245 take?")
+
+    assert 'value="How long did issue #245 take?"' in html
+    assert "dbcli/litecli#245 is queued" in html
+    assert 'href="/issues/dbcli/litecli/245"' in html
+    assert f'href="/attempts/{attempt_id}"' in html
 
 
 def test_dashboard_state_updates_runtime_config() -> None:

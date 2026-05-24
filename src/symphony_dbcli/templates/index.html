@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_ask_answer.html" import render_ask_answer %}
 {% block body %}
 <section class="metrics">
   <div class="metric metric-state {{ 'is-cautious' if runtime.dry_run else 'is-live' }}">
@@ -143,10 +144,16 @@
 </section>
 
 <section class="toolbar">
-  <form action="/ask" method="get">
-    <input name="q" placeholder="Ask about issue timing, turns, errors, or workers" />
+  <form action="/" method="get" data-ask-form>
+    <input
+      name="q"
+      value="{{ ask_question }}"
+      placeholder="Ask about issue timing, turns, errors, or workers"
+      aria-describedby="ask-answer"
+    />
     <button type="submit">Ask</button>
   </form>
+  {{ render_ask_answer(ask_answer) }}
 </section>
 
 <section>

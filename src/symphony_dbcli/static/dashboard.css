@@ -400,6 +400,47 @@ a {
   gap: 8px;
 }
 
+.inline-answer {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfd;
+}
+
+.inline-answer p {
+  margin: 0;
+}
+
+.inline-answer.is-empty {
+  background: transparent;
+}
+
+.inline-answer.is-loading {
+  opacity: 0.72;
+}
+
+.answer-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.answer-links a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 10px;
+  background: #ffffff;
+  color: #135f7a;
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
 input {
   flex: 1;
   min-width: 0;

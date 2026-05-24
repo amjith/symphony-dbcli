@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import mimetypes
 import sqlite3
 import urllib.parse
@@ -12,7 +13,7 @@ from typing import Any
 
 from jinja2 import Environment, PackageLoader, StrictUndefined, select_autoescape
 
-from .ask import answer_question
+from .ask import AskAnswer, answer_with_links
 from .config import WorkflowConfig, default_config
 from .review_actions import ReviewActionError, ReviewActions
 from .store import Store
@@ -150,8 +151,10 @@ def render_index(
     store: Store,
     runtime: DashboardRuntime | None = None,
     config: WorkflowConfig | None = None,
+    ask_question: str = "",
 ) -> str:
     cfg = config or default_config()
+    ask_answer = answer_with_links(store, ask_question) if ask_question else None
     return (
         _templates()
         .get_template("index.html")
@@ -164,16 +167,22 @@ def render_index(
                 cfg,
                 start_queued_work_automatically=store.start_queued_work_automatically(),
             ),
+            ask_question=ask_question,
+            ask_answer=ask_answer,
         )
     )
 
 
-def render_ask(store: Store, question: str) -> str:
-    answer = (
-        answer_question(store, question)
+def render_ask_answer(store: Store, question: str) -> AskAnswer:
+    return (
+        answer_with_links(store, question)
         if question
-        else "Ask a question about workers, issues, timing, turns, or errors."
+        else AskAnswer("Ask a question about workers, issues, timing, turns, or errors.", [])
     )
+
+
+def render_ask(store: Store, question: str) -> str:
+    answer = render_ask_answer(store, question)
     return (
         _templates()
         .get_template("ask.html")
@@ -232,6 +241,7 @@ def _handler_factory(store: Store, state: DashboardState) -> type[BaseHTTPReques
                 self._send_static(parsed.path.removeprefix("/static/"))
                 return
             if parsed.path == "/":
+                params = urllib.parse.parse_qs(parsed.query)
                 self._send_html(
                     render_index(
                         store,
@@ -239,7 +249,19 @@ def _handler_factory(store: Store, state: DashboardState) -> type[BaseHTTPReques
                             start_queued_work_automatically=store.start_queued_work_automatically()
                         ),
                         state.config(),
+                        ask_question=params.get("q", [""])[0],
                     )
+                )
+                return
+            if parsed.path == "/ask/answer":
+                params = urllib.parse.parse_qs(parsed.query)
+                answer = render_ask_answer(store, params.get("q", [""])[0])
+                self._send_json(
+                    {
+                        "question": params.get("q", [""])[0],
+                        "answer": answer.text,
+                        "links": [{"label": link.label, "url": link.url} for link in answer.links],
+                    }
                 )
                 return
             if parsed.path == "/ask":
@@ -350,6 +372,15 @@ def _handler_factory(store: Store, state: DashboardState) -> type[BaseHTTPReques
             encoded = body.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
+
+        def _send_json(self, data: dict[str, Any]) -> None:
+            encoded = json.dumps(data).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)

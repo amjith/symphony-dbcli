@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from symphony_dbcli.ask import answer_question
+from symphony_dbcli.ask import answer_question, answer_with_links
 from symphony_dbcli.config import default_config, render_workflow
 from symphony_dbcli.store import IssueSnapshot, Store
 
@@ -43,3 +43,11 @@ def test_ask_summarizes_issue_metrics(tmp_path: Path) -> None:
     assert "dbcli/mycli#99" in answer
     assert "Turns: 1" in answer
     assert f"Workflow version: {version_id}" in answer
+
+    rich_answer = answer_with_links(store, "How long did issue #99 take?")
+
+    assert rich_answer.text == answer
+    assert rich_answer.links[0].label == "Issue detail"
+    assert rich_answer.links[0].url == "/issues/dbcli/mycli/99"
+    assert rich_answer.links[1].label == f"Attempt {attempt_id}"
+    assert rich_answer.links[1].url == f"/attempts/{attempt_id}"
