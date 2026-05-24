@@ -14,6 +14,7 @@ from .config import WorkflowConfig, WorkflowError, parse_workflow
 from .github import GitHubClient, GitHubError, GitHubIssue, PullRequest
 from .runner import CodexRunner
 from .store import IssueSnapshot, Store
+from .workflow_engine import WorkflowEngine, WorkflowEngineError, WorkflowExecutionContext, WorkflowTrigger
 from .worktree import WorktreeError, WorktreeManager
 
 
@@ -381,7 +382,13 @@ class Orchestrator:
                 title,
                 follow_up_context=_format_follow_up_context(self.store.follow_up_source_result(attempt_id)),
             )
-            codex_transition = "fix_issue" if resolved_task_type == "code" else "research_issue"
+            codex_transition = self._single_workflow_transition_name(
+                from_state=self._transition_to_state("run_setup", fallback="setup_complete"),
+                trigger="automatic",
+                task_type=resolved_task_type,
+                actions={"codex.fix_issue", "codex.research_issue"},
+                fallback="fix_issue" if resolved_task_type == "code" else "research_issue",
+            )
             codex_action = self._start_workflow_action(
                 instance_id,
                 attempt_id=attempt_id,
@@ -494,6 +501,32 @@ class Orchestrator:
             return fallback
         return transition.from_state
 
+    def _transition_to_state(self, transition_name: str, *, fallback: str) -> str:
+        transition = self.config.workflow.transitions.get(transition_name)
+        if not transition:
+            return fallback
+        return transition.to_state
+
+    def _single_workflow_transition_name(
+        self,
+        *,
+        from_state: str,
+        trigger: WorkflowTrigger,
+        task_type: str,
+        actions: set[str],
+        fallback: str,
+    ) -> str:
+        try:
+            match = WorkflowEngine(self.config.workflow).single_transition(
+                from_state=from_state,
+                trigger=trigger,
+                context=WorkflowExecutionContext(task_type=task_type),
+                actions=actions,
+            )
+        except WorkflowEngineError:
+            return fallback
+        return match.name if match else fallback
+
     def _start_workflow_action(
         self,
         instance_id: int,
@@ -584,18 +617,26 @@ class Orchestrator:
             return
 
     def _open_review_gate(self, instance_id: int, task_type: str) -> None:
-        transition_name = "create_draft_pr" if task_type == "code" else "post_answer"
-        transition = self.config.workflow.transitions.get(transition_name)
-        if not transition or not transition.gate:
+        review_state = self._transition_to_state("request_review", fallback="review")
+        try:
+            matches = WorkflowEngine(self.config.workflow).matching_transitions(
+                from_state=review_state,
+                trigger="human",
+                context=WorkflowExecutionContext(task_type=task_type),
+            )
+        except WorkflowEngineError:
             return
-        self.store.open_workflow_gate(
-            instance_id=instance_id,
-            workflow_version_id=self.workflow_version_id,
-            gate=transition.gate,
-            transition_name=transition_name,
-            state=transition.from_state,
-            prompt=transition.description,
-        )
+        for match in matches:
+            if not match.transition.gate:
+                continue
+            self.store.open_workflow_gate(
+                instance_id=instance_id,
+                workflow_version_id=self.workflow_version_id,
+                gate=match.transition.gate,
+                transition_name=match.name,
+                state=match.transition.from_state,
+                prompt=match.transition.description,
+            )
 
     def _complete_github_side_effects(
         self,
