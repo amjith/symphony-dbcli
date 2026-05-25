@@ -62,6 +62,10 @@ function setupKanbanDrag() {
     (list) => list.dataset.state !== "backlog",
   );
   for (const list of lists) {
+    if (list.dataset.sortableReady === "true") {
+      continue;
+    }
+    list.dataset.sortableReady = "true";
     window.Sortable.create(list, {
       group: "work-items",
       animation: 120,
@@ -91,3 +95,9 @@ function setupKanbanDrag() {
 }
 
 setupKanbanDrag();
+
+document.body.addEventListener("htmx:afterSwap", (event) => {
+  if (event.target.id === "dashboard-main") {
+    setupKanbanDrag();
+  }
+});

@@ -36,8 +36,14 @@ def test_fastapi_dashboard_exposes_navigation_and_board(tmp_path: Path) -> None:
     assert 'href="/workflow"' in response.text
     assert "Backlog" in response.text
     assert "In Review" in response.text
+    assert 'id="dashboard-main"' in response.text
     assert 'name="backlog_q"' in response.text
     assert 'name="todo_q"' in response.text
+    assert 'hx-trigger="input changed delay:200ms, search"' in response.text
+    assert 'hx-target="#dashboard-main"' in response.text
+    assert 'hx-select="#dashboard-main"' in response.text
+    assert 'hx-swap="outerHTML"' in response.text
+    assert 'hx-push-url="true"' in response.text
     assert "dbcli/litecli" in response.text
     assert "Sync Source" in response.text
     assert "auto dispatch" in response.text

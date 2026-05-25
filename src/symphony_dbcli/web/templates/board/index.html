@@ -54,6 +54,15 @@
         name="{{ column.query_param }}"
         value="{{ column.query }}"
         placeholder="Search {{ column.label|lower }}"
+        autocomplete="off"
+        hx-get="{{ column.form_action }}"
+        hx-trigger="input changed delay:200ms, search"
+        hx-target="#dashboard-main"
+        hx-select="#dashboard-main"
+        hx-swap="outerHTML"
+        hx-include="closest form"
+        hx-push-url="true"
+        hx-sync="closest form:replace"
       />
       <button type="submit">Search</button>
       {% if column.query %}
