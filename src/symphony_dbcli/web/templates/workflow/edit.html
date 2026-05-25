@@ -1,11 +1,112 @@
 {% extends "base.html" %}
+{% block page_actions %}
+<a class="button-link quiet" href="/workflow">Back to Workflow</a>
+{% endblock %}
 {% block body %}
+<section class="panel flow-panel">
+  <div class="section-heading">
+    <div>
+      <h2>Workflow Preview</h2>
+      <span class="muted">Validate edits before applying them to WORKFLOW.md</span>
+    </div>
+    {% if applied %}
+    <span class="status-pill is-ok">applied</span>
+    {% elif proposal.valid %}
+    <span class="status-pill is-ok">valid</span>
+    {% else %}
+    <span class="status-pill is-error">invalid</span>
+    {% endif %}
+  </div>
+  {% if workflow_chart %}
+  <div class="workflow-flowchart" data-workflow-flowchart>
+    <div class="workflow-flowchart-canvas" data-workflow-canvas>
+      <svg
+        data-workflow-svg
+        width="{{ workflow_chart.width }}"
+        height="{{ workflow_chart.height }}"
+        viewBox="0 0 {{ workflow_chart.width }} {{ workflow_chart.height }}"
+        role="img"
+        aria-label="Workflow edit preview flowchart"
+      >
+        <defs>
+          <marker id="workflow-edit-arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+            <path class="workflow-flow-arrowhead" d="M 0 0 L 10 4 L 0 8 z"></path>
+          </marker>
+          <marker id="workflow-edit-arrow-human" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+            <path class="workflow-flow-arrowhead-human" d="M 0 0 L 10 4 L 0 8 z"></path>
+          </marker>
+        </defs>
+        {% for edge in workflow_chart.edges %}
+        <g class="workflow-flow-edge {{ 'is-human' if edge.trigger == 'human' else '' }} {{ 'is-backward' if edge.backward else '' }}">
+          <title>
+            {{ edge.name }}: {{ edge.from_state }} to {{ edge.to_state }} via {{ edge.action }}{% if edge.condition %}; {{ edge.condition }}{% endif %}
+          </title>
+          <path
+            d="{{ edge.path }}"
+            marker-end="url(#{{ 'workflow-edit-arrow-human' if edge.trigger == 'human' else 'workflow-edit-arrow' }})"
+          ></path>
+          <text x="{{ edge.label_x }}" y="{{ edge.label_y }}">{{ edge.name }}</text>
+        </g>
+        {% endfor %}
+        {% for node in workflow_chart.nodes %}
+        <g
+          class="workflow-flow-node {{ 'is-initial' if node.name == workflow_chart.initial_state else '' }} {{ 'is-terminal' if node.terminal else '' }} {{ 'has-gate' if node.gate else '' }} {{ 'has-active' if node.active_count else '' }}"
+          transform="translate({{ node.x }} {{ node.y }})"
+        >
+          <title>{{ node.description }}</title>
+          <rect width="{{ node.width }}" height="{{ node.height }}" rx="8"></rect>
+          <text class="workflow-flow-node-title" x="12" y="23">{{ node.name }}</text>
+          {% if node.description_lines %}
+          {% for line in node.description_lines %}
+          <text class="workflow-flow-node-desc" x="12" y="{{ 45 + (loop.index0 * 14) }}">{{ line }}</text>
+          {% endfor %}
+          {% else %}
+          <text class="workflow-flow-node-desc" x="12" y="45">-</text>
+          {% endif %}
+          {% if node.gate %}
+          <text class="workflow-flow-node-meta" x="12" y="80">gate: {{ node.gate }}</text>
+          {% elif node.terminal %}
+          <text class="workflow-flow-node-meta" x="12" y="80">terminal</text>
+          {% elif node.name == workflow_chart.initial_state %}
+          <text class="workflow-flow-node-meta" x="12" y="80">initial</text>
+          {% endif %}
+        </g>
+        {% endfor %}
+      </svg>
+    </div>
+  </div>
+  {% else %}
+  <div class="empty-state">Valid WORKFLOW.md content is required to render the preview.</div>
+  {% endif %}
+</section>
+
 <section class="panel">
-  <form class="stacked-form" method="post" action="/workflow/edit">
-    <label for="workflow-request">Change Request</label>
-    <textarea id="workflow-request" name="request" rows="5"></textarea>
-    <button type="submit">Generate Proposal</button>
+  <div class="section-heading">
+    <h2>Workflow Edit</h2>
+  </div>
+  <form action="/workflow/edit" method="post" class="stacked-form workflow-edit-form">
+    <label for="workflow-request">Change request</label>
+    <textarea id="workflow-request" name="request" rows="4">{{ proposal.request }}</textarea>
+
+    {% if proposal.diff %}
+    <div>
+      <span class="kicker">Proposed diff</span>
+      <pre class="result-body">{{ proposal.diff }}</pre>
+    </div>
+    {% endif %}
+
+    {% if proposal.error %}
+    <p class="form-error">{{ proposal.error }}</p>
+    {% endif %}
+
+    <label for="proposed-content">WORKFLOW.md proposal</label>
+    <textarea id="proposed-content" name="proposed_content" rows="28">{{ proposal.proposed_content }}</textarea>
+
+    <div class="form-actions">
+      <button type="submit" name="action" value="generate">Generate Proposal</button>
+      <button type="submit" name="action" value="preview">Preview</button>
+      <button type="submit" name="action" value="apply" {% if not proposal.valid %}disabled{% endif %}>Apply</button>
+    </div>
   </form>
 </section>
 {% endblock %}
-

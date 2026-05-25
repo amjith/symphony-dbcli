@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% from "_draft_replies.html" import draft_replies %}
+{% block body %}
+{% if not detail %}
+<section class="panel empty-state">Attempt not found.</section>
+{% else %}
+<section class="runtime-grid">
+  <div><span class="kicker">Status</span><strong>{{ detail.attempt.status }}</strong></div>
+  <div><span class="kicker">Turns</span><strong>{{ detail.attempt.turn_count }}</strong></div>
+  <div><span class="kicker">Errors</span><strong>{{ detail.attempt.error_count }}</strong></div>
+  <div><span class="kicker">Codex</span><strong>{{ detail.attempt.codex_duration_ms|ms }}</strong></div>
+</section>
+
+{% if pending_gates %}
+<section class="panel">
+  <div class="section-heading">
+    <h2>Pending Workflow Gates</h2>
+    <span class="muted">{{ pending_gates|length }}</span>
+  </div>
+  <div class="gate-list">
+    {% for gate in pending_gates %}
+    <article class="gate-card">
+      <div class="draft-meta">
+        <strong>{{ gate.transition_name }}</strong>
+        <span>{{ gate.gate }}</span>
+        <span>{{ gate.created_at }}</span>
+      </div>
+      {% if gate.prompt %}
+      <p>{{ gate.prompt }}</p>
+      {% endif %}
+      {% if gate.transition_name in ["create_draft_pr", "post_answer"] %}
+      <p class="muted">Review the editable output below before continuing.</p>
+      {% else %}
+      <form action="/workflow-gates/{{ gate.id }}/run" method="post" class="inline-form">
+        <input type="hidden" name="return_to" value="{{ return_to }}" />
+        <button type="submit">Run Gate</button>
+      </form>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="workflow-detail-grid">
+  <div class="panel">
+    <div class="section-heading">
+      <h2>Worker Result</h2>
+      {% if detail.result %}<span class="status-pill is-ok">{{ detail.result.status }}</span>{% endif %}
+    </div>
+    {% if detail.result %}
+    <div class="draft-meta">
+      <strong>{{ detail.result.title }}</strong>
+      <span>{{ detail.result.result_type|replace("_", " ") }}</span>
+      <span>{{ detail.result.updated_at }}</span>
+    </div>
+    {% if detail.result.body %}
+    <pre class="result-body">{{ detail.result.body }}</pre>
+    {% else %}
+    <div class="empty-state">The worker completed without a final message.</div>
+    {% endif %}
+    {% if detail.attempt.task_type == "research" and detail.result.body %}
+    <div class="form-actions">
+      {% if detail.code_follow_up %}
+      <a class="button-link" href="/attempts/{{ detail.code_follow_up.id }}">
+        Code follow-up attempt {{ detail.code_follow_up.id }}
+      </a>
+      <span class="muted">{{ detail.code_follow_up.status }}</span>
+      {% else %}
+      <form action="/attempts/{{ detail.attempt.id }}/follow-up-code" method="post">
+        <button type="submit">Create Code Follow-up</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="empty-state">No worker result recorded.</div>
+    {% endif %}
+  </div>
+
+  <div class="panel">
+    <div class="section-heading">
+      <h2>Workspace</h2>
+    </div>
+    <dl class="settings-list">
+      <div><dt>Repo</dt><dd>{{ detail.attempt.repo }}#{{ detail.attempt.issue_number }}</dd></div>
+      <div><dt>Branch</dt><dd>{{ detail.attempt.branch or "-" }}</dd></div>
+      <div><dt>Worktree</dt><dd>{{ detail.attempt.worktree_path or "-" }}</dd></div>
+      <div><dt>Workflow</dt><dd>{{ detail.attempt.workflow_version_id or "unknown" }}</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-heading">
+    <h2>Pull Request</h2>
+  </div>
+  {% if detail.pull_requests %}
+  <div class="compact-table-wrap">
+    <table class="data-table compact-table">
+      <thead><tr><th>PR</th><th>Title</th><th>State</th><th>Worktree</th><th>Created</th></tr></thead>
+      <tbody>
+        {% for row in detail.pull_requests %}
+        <tr>
+          <td><a href="{{ row.url }}" target="_blank" rel="noreferrer">#{{ row.number }}</a></td>
+          <td>{{ row.title }}</td>
+          <td>
+            {{ row.state or "unknown" }}
+            {% if row.merged_at %}<div class="muted">merged {{ row.merged_at }}</div>{% endif %}
+          </td>
+          <td>
+            {% if row.worktree_cleaned_at %}
+            cleaned {{ row.worktree_cleaned_at }}
+            {% elif row.cleanup_error %}
+            <span class="form-error">{{ row.cleanup_error }}</span>
+            {% else %}
+            pending merge
+            {% endif %}
+          </td>
+          <td>{{ row.created_at }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif detail.attempt.task_type == "code" and create_draft_pr_gate and draft_pr_content and detail.attempt.worktree_path and detail.attempt.branch %}
+  <form action="/workflow-gates/{{ create_draft_pr_gate.id }}/run" method="post" class="stacked-form draft-form">
+    <input type="hidden" name="return_to" value="{{ return_to }}" />
+    <label for="draft-pr-title">Pull request title</label>
+    <input id="draft-pr-title" name="title" value="{{ draft_pr_content.title }}" />
+    <label for="draft-pr-body">Pull request description</label>
+    <textarea id="draft-pr-body" name="body" rows="12">{{ draft_pr_content.body }}</textarea>
+    <div class="form-actions">
+      <button type="submit">Create Draft PR</button>
+    </div>
+  </form>
+  {% else %}
+  <div class="empty-state">No pull request.</div>
+  {% endif %}
+</section>
+
+{% if detail.source_result %}
+<section class="panel">
+  <div class="section-heading">
+    <h2>Source Research</h2>
+  </div>
+  <div class="draft-meta">
+    <strong><a href="/attempts/{{ detail.source_result.source_attempt_id }}">
+      Attempt {{ detail.source_result.source_attempt_id }}
+    </a></strong>
+    <span>{{ detail.source_result.result_type|replace("_", " ") }}</span>
+    <span>{{ detail.source_result.result_updated_at }}</span>
+  </div>
+  <pre class="result-body">{{ detail.source_result.body }}</pre>
+</section>
+{% endif %}
+
+{% if detail.follow_up_targets %}
+<section class="panel">
+  <div class="section-heading">
+    <h2>Follow-up Tasks</h2>
+    <span class="muted">{{ detail.follow_up_targets|length }}</span>
+  </div>
+  <div class="compact-table-wrap">
+    <table class="data-table compact-table">
+      <thead><tr><th>Attempt</th><th>Relationship</th><th>Status</th><th>Type</th><th>Created</th></tr></thead>
+      <tbody>
+        {% for row in detail.follow_up_targets %}
+        <tr>
+          <td><a href="/attempts/{{ row.id }}">{{ row.id }}</a></td>
+          <td>{{ row.relationship|replace("_", " ") }}</td>
+          <td>{{ row.status }}</td>
+          <td>{{ row.task_type }}</td>
+          <td>{{ row.linked_at }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{{ draft_replies(
+  detail.comments,
+  post_gate_id=post_answer_gate.id if post_answer_gate else none,
+  return_to=return_to,
+  legacy_post=False
+) }}
+
+<section class="panel">
+  <div class="section-heading">
+    <h2>Timeline</h2>
+    <span class="muted">{{ detail.timeline|length }}</span>
+  </div>
+  {% if detail.timeline %}
+  <div class="compact-table-wrap">
+    <table class="data-table compact-table">
+      <thead><tr><th>Phase</th><th>Event</th><th>Message</th><th>Duration</th></tr></thead>
+      <tbody>
+        {% for row in detail.timeline %}
+        <tr><td>{{ row.phase }}</td><td>{{ row.event_type }}</td><td>{{ row.message }}</td><td>{{ row.duration_ms|ms }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No timeline events.</div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="section-heading">
+    <h2>Errors</h2>
+    <span class="muted">{{ detail.errors|length }}</span>
+  </div>
+  {% if detail.errors %}
+  <div class="compact-table-wrap">
+    <table class="data-table compact-table">
+      <thead><tr><th>Phase</th><th>Type</th><th>Message</th></tr></thead>
+      <tbody>
+        {% for row in detail.errors %}
+        <tr><td>{{ row.phase }}</td><td>{{ row.error_type }}</td><td class="form-error">{{ row.message }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No errors.</div>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

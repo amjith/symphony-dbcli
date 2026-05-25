@@ -19,9 +19,54 @@ from symphony_dbcli.models import (
     WorkItemStateEvent,
 )
 from symphony_dbcli.review_actions import issue_link_marker
+from symphony_dbcli.runtime import RuntimeCycleResult, RuntimeStatus, RuntimeWorkerView
 from symphony_dbcli.sources import SourceSyncClient
-from symphony_dbcli.store import Store
+from symphony_dbcli.store import IssueSnapshot, Store
 from symphony_dbcli.web.app import create_app
+from symphony_dbcli.web.dependencies import WebRuntime
+
+
+def _legacy_store(tmp_path: Path) -> Store:
+    store = Store(tmp_path / "symphony.db")
+    store.init()
+    return store
+
+
+def _seed_legacy_issue(store: Store) -> None:
+    store.upsert_issue(
+        IssueSnapshot(
+            repo="dbcli/litecli",
+            number=245,
+            title="Logging support question",
+            url="https://github.com/dbcli/litecli/issues/245",
+            state="open",
+            labels=["symphony:todo"],
+            task_type="research",
+        )
+    )
+
+
+def _open_attempt_gate(store: Store, attempt_id: int, *, transition_name: str, gate: str) -> int:
+    attempt = store.attempt_by_id(attempt_id)
+    assert attempt is not None
+    instance_id = store.create_workflow_instance(
+        repo=str(attempt["repo"]),
+        issue_number=int(attempt["issue_number"]),
+        task_type=str(attempt["task_type"]),
+        workflow_version_id=None,
+        initial_state="review",
+        attempt_id=attempt_id,
+    )
+    return int(
+        store.open_workflow_gate(
+            instance_id=instance_id,
+            workflow_version_id=None,
+            gate=gate,
+            transition_name=transition_name,
+            state="review",
+            prompt="Review the generated output.",
+        )
+    )
 
 
 def test_fastapi_dashboard_exposes_navigation_and_board(tmp_path: Path) -> None:
@@ -90,6 +135,64 @@ def test_fastapi_workflow_page_renders_vertical_flowchart(tmp_path: Path) -> Non
     assert "fix_issue" in response.text
     assert "create_draft_pr" in response.text
     assert "Pending Gates" in response.text
+
+
+def test_fastapi_workers_page_shows_runtime_status(tmp_path: Path) -> None:
+    runtime = FakeRuntime()
+    client = _client(tmp_path, runtime=runtime)
+
+    response = client.get("/workers")
+
+    assert response.status_code == 200
+    assert "Run workflow cycle now" in response.text
+    assert 'action="/workflow/run-cycle"' in response.text
+    assert "Attached" in response.text
+    assert "Running" in response.text
+    assert "Enabled" in response.text
+    assert "2026-05-25T12:01:00+00:00" in response.text
+    assert "3 queued, 1 running" in response.text
+    assert "worker-42" in response.text
+    assert "dbcli/litecli#245" in response.text
+    assert "No cycle has run in this FastAPI process yet." in response.text
+
+
+def test_fastapi_manual_cycle_endpoint_calls_runtime(tmp_path: Path) -> None:
+    runtime = FakeRuntime()
+    client = _client(tmp_path, runtime=runtime)
+
+    response = client.post("/workflow/run-cycle")
+
+    assert response.status_code == 200
+    assert runtime.triggers == ["manual"]
+    assert "Workflow Cycle" in response.text
+    assert "Completed" in response.text
+    assert "Issues Synced" in response.text
+    assert "2" in response.text
+    assert "Workers Started" in response.text
+
+
+def test_fastapi_workers_page_handles_missing_runtime(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.get("/workers")
+
+    assert response.status_code == 200
+    assert "Not attached" in response.text
+    assert "Runtime service is not attached to FastAPI yet." in response.text
+
+
+def test_fastapi_lifespan_starts_and_stops_attached_runtime(tmp_path: Path) -> None:
+    config = replace(default_config(), database=DatabaseConfig(path=str(tmp_path / "symphony.db")))
+    store = Store(config.database.path)
+    store.init()
+    runtime = FakeRuntime()
+
+    with TestClient(create_app(config, store, runtime=runtime, run_runtime=True)) as client:
+        assert client.get("/api/health").status_code == 200
+        assert runtime.started is True
+        assert runtime.stopped is False
+
+    assert runtime.stopped is True
 
 
 def test_fastapi_health_reports_runtime_context(tmp_path: Path) -> None:
@@ -527,7 +630,145 @@ def test_fastapi_ask_renders_inline_board_answer(tmp_path: Path) -> None:
     assert 'href="/work-items"' in response.text
 
 
-def _client(tmp_path: Path, source_sync_client: SourceSyncClient | None = None) -> TestClient:
+def test_fastapi_attempt_and_issue_pages_cover_review_actions(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    store = _legacy_store(tmp_path)
+    _seed_legacy_issue(store)
+    attempt_id = store.create_attempt(
+        repo="dbcli/litecli",
+        issue_number=245,
+        task_type="research",
+        workflow_version_id=None,
+        status="review",
+    )
+    store.record_worker_result(
+        attempt_id=attempt_id,
+        repo="dbcli/litecli",
+        issue_number=245,
+        result_type="research_answer",
+        title="Research Answer",
+        body="Worker result body",
+    )
+    store.record_comment(
+        attempt_id,
+        repo="dbcli/litecli",
+        issue_number=245,
+        url="",
+        body="Suggested reply body",
+        status="drafted",
+    )
+    gate_id = _open_attempt_gate(store, attempt_id, transition_name="post_answer", gate="review_answer")
+
+    attempt = client.get(f"/attempts/{attempt_id}")
+    issue = client.get("/issues/dbcli/litecli/245")
+
+    assert attempt.status_code == 200
+    assert "Worker Result" in attempt.text
+    assert "Pending Workflow Gates" in attempt.text
+    assert "post_answer" in attempt.text
+    assert "Worker result body" in attempt.text
+    assert "Suggested reply body" in attempt.text
+    assert f'action="/workflow-gates/{gate_id}/run"' in attempt.text
+    assert issue.status_code == 200
+    assert "Logging support question" in issue.text
+    assert "Attempts" in issue.text
+    assert f'href="/attempts/{attempt_id}"' in issue.text
+    assert "Post to GitHub" in issue.text
+    assert 'action="/comments/' in issue.text
+
+
+def test_fastapi_attempt_page_creates_code_follow_up_and_renders_draft_pr_gate(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    store = _legacy_store(tmp_path)
+    _seed_legacy_issue(store)
+    research_attempt_id = store.create_attempt(
+        repo="dbcli/litecli",
+        issue_number=245,
+        task_type="research",
+        workflow_version_id=None,
+        status="review",
+    )
+    store.record_worker_result(
+        attempt_id=research_attempt_id,
+        repo="dbcli/litecli",
+        issue_number=245,
+        result_type="research_answer",
+        title="Research Answer",
+        body="Expand log_file before checking its parent directory.",
+    )
+    code_attempt_id = store.create_attempt(
+        repo="dbcli/litecli",
+        issue_number=245,
+        task_type="code",
+        workflow_version_id=None,
+        worktree_path="/tmp/litecli",
+        branch="symphony/dbcli-litecli-245-attempt-1",
+        status="review",
+    )
+    store.record_worker_result(
+        attempt_id=code_attempt_id,
+        repo="dbcli/litecli",
+        issue_number=245,
+        result_type="code_changes",
+        title="Code Changes",
+        body="Summary:\n- Expanded configured `log_file` paths.",
+    )
+    gate_id = _open_attempt_gate(
+        store,
+        code_attempt_id,
+        transition_name="create_draft_pr",
+        gate="review_diff",
+    )
+
+    follow_up = client.post(f"/attempts/{research_attempt_id}/follow-up-code", follow_redirects=False)
+    follow_up_detail = client.get(follow_up.headers["location"])
+    draft_pr = client.get(f"/attempts/{code_attempt_id}")
+
+    assert follow_up.status_code == 303
+    assert follow_up.headers["location"].startswith("/attempts/")
+    assert "Source Research" in follow_up_detail.text
+    assert "Expand log_file" in follow_up_detail.text
+    assert draft_pr.status_code == 200
+    assert "Create Draft PR" in draft_pr.text
+    assert f'action="/workflow-gates/{gate_id}/run"' in draft_pr.text
+    assert 'name="title"' in draft_pr.text
+    assert 'name="body"' in draft_pr.text
+    assert "Fix #245: Expanded configured log_file paths" in draft_pr.text
+    assert "Fixes https://github.com/dbcli/litecli/issues/245" in draft_pr.text
+
+
+def test_fastapi_workflow_edit_preview_posts_without_legacy_server(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/workflow/edit",
+        data={"request": "Prefer unit tests over integration tests.", "action": "preview"},
+    )
+
+    assert response.status_code == 200
+    assert "Workflow Edit" in response.text
+    assert "Workflow Preview" in response.text
+    assert "Prefer unit tests over integration tests." in response.text
+    assert "WORKFLOW.md proposal" in response.text
+
+
+def test_fastapi_github_app_callback_matches_legacy_setup_page(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.get("/github-app/callback?code=abc123&state=xyz")
+
+    assert response.status_code == 200
+    assert "GitHub App Created" in response.text
+    assert "abc123" in response.text
+    assert "State: xyz" in response.text
+    assert "uv run symphony-dbcli github-app convert --code abc123" in response.text
+
+
+def _client(
+    tmp_path: Path,
+    source_sync_client: SourceSyncClient | None = None,
+    runtime: WebRuntime | None = None,
+) -> TestClient:
     config = replace(default_config(), database=DatabaseConfig(path=str(tmp_path / "symphony.db")))
     store = Store(config.database.path)
     store.init()
@@ -537,6 +778,7 @@ def _client(tmp_path: Path, source_sync_client: SourceSyncClient | None = None) 
             store,
             workflow_path="WORKFLOW.md",
             source_sync_client=source_sync_client,
+            runtime=runtime,
         )
     )
 
@@ -606,6 +848,61 @@ def _work_item(tmp_path: Path, work_item_id: int) -> WorkItem:
     session_factory = create_session_factory(create_db_engine(str(tmp_path / "symphony.db")))
     with session_factory() as session:
         return session.scalars(select(WorkItem).where(WorkItem.id == work_item_id)).one()
+
+
+class FakeRuntime:
+    def __init__(self) -> None:
+        self.triggers: list[str] = []
+        self.started = False
+        self.stopped = False
+        self.cycle_result = RuntimeCycleResult(
+            trigger="manual",
+            status="succeeded",
+            started_at="2026-05-25T12:00:00+00:00",
+            completed_at="2026-05-25T12:00:03+00:00",
+            synced=2,
+            advanced=1,
+            claimed=1,
+            workers_started=1,
+        )
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def run_cycle(self, *, trigger: str = "manual") -> RuntimeCycleResult:
+        self.triggers.append(trigger)
+        return self.cycle_result
+
+    def status(self) -> RuntimeStatus:
+        return RuntimeStatus(
+            enabled=True,
+            running=True,
+            polling_enabled=True,
+            cycle_running=False,
+            profile="local",
+            poll_interval_seconds=5,
+            next_cycle_at="2026-05-25T12:01:00+00:00",
+            last_cycle=self.cycle_result if self.triggers else None,
+            queued_attempts=3,
+            running_attempts=1,
+            workers=[
+                RuntimeWorkerView(
+                    worker_id="worker-42",
+                    attempt_id=42,
+                    repo="dbcli/litecli",
+                    issue_number=245,
+                    task_type="code",
+                    pid=4242,
+                    heartbeat_at="2026-05-25T12:00:02+00:00",
+                    deadline_at="2026-05-25T13:00:00+00:00",
+                    started_at="2026-05-25T12:00:00+00:00",
+                    retry_count=1,
+                )
+            ],
+        )
 
 
 class FakeSourceSyncClient:

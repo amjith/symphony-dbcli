@@ -629,8 +629,84 @@ Implementation checklist:
   activation.
 - [x] Extend the GitHub-backed e2e scenario through PR review/fix workflow.
 
+## FastAPI Runtime Cutover Task List
+
+The new FastAPI dashboard now owns the primary UI surface, but the worker loop
+still lives behind the legacy `serve` command and custom `BaseHTTPRequestHandler`
+dashboard. The next milestone is to make FastAPI the only normal runtime:
+dashboard, source sync, workflow advancement, worker supervision, manual cycle
+triggering, and graceful shutdown should all run through one shared runtime
+service.
+
+Implementation checklist:
+
+- [x] Extract an orchestration runtime service from the legacy CLI/dashboard
+  loop. It should own `WorkflowWatcher`, `WorkerSupervisor`, the current
+  accepted workflow version, cycle locking, last-cycle result, and next-poll
+  timing.
+- [x] Give the runtime an explicit API: `start()`, `stop()`,
+  `run_cycle(trigger=...)`, `last_cycle_result`, and status/read-model helpers
+  for the dashboard.
+- [x] Move the existing cycle behavior into that runtime without changing
+  semantics: reload `WORKFLOW.md`, reconcile crashed/stale workers, sync
+  sources or legacy issues, clean merged-PR worktrees, advance ready workflow
+  instances, claim available work, and dispatch queued workers.
+- [x] Ensure only one orchestration cycle can run at a time. Timer-triggered
+  cycles and manual dashboard-triggered cycles should share the same lock and
+  return a useful "already running" status instead of overlapping.
+- [x] Attach the runtime to FastAPI lifespan startup/shutdown. Startup should
+  initialize the store and SQLAlchemy model tables, record the current
+  workflow version, and start the background loop. Shutdown should stop the
+  loop and reconcile or gracefully terminate tracked worker processes.
+- [x] Add a FastAPI manual run endpoint, likely `POST /workflow/run-cycle` or
+  `POST /api/orchestration/cycle`, that calls the same `run_cycle()` method
+  used by the timer and returns a status banner or refreshed dashboard
+  fragment.
+- [x] Update the FastAPI Workers page to show real runtime state: polling
+  enabled/running, next poll time, last cycle summary, queued attempts, running
+  workers, crashed/timed-out/retried counts, and worker process identifiers.
+- [x] Add a clear "Run workflow cycle now" control to the FastAPI UI. The
+  button should be visible from the workflow or workers page and should not
+  depend on the old dashboard route.
+- [x] Port remaining legacy dashboard actions to FastAPI routes before
+  removing the old server: run human gates, post generated comments, create
+  draft PRs, create code follow-ups, edit/apply workflow changes, and view
+  attempt details.
+- [x] Move shared dashboard read models such as `DashboardRuntime` out of
+  `dashboard.py` into a FastAPI-owned module so the new web app no longer
+  imports from the legacy custom server module.
+- [x] Change `symphony-dbcli serve` to run the FastAPI app plus runtime loop.
+  Keep the old implementation temporarily as `serve-legacy` or another
+  explicit fallback command until route parity is complete.
+- [x] Decide the fate of `serve-web`: either remove it, make it an alias for
+  the new `serve`, or keep it as a dashboard-only debug command with a name
+  that makes the missing worker loop explicit.
+- [x] Document that the local/pre-alpha FastAPI runtime is single-process only.
+  Running multiple Uvicorn workers would start multiple orchestration loops
+  unless a future DB-backed leader lock is added.
+- [ ] Add a DB-backed leader/runtime lock before production deployment on
+  exe.dev if there is any chance of multiple app processes or overlapping
+  deployments.
+- [x] Add focused tests for the extracted runtime: cycle ordering, workflow
+  reload, source sync, workflow advancement, claim/dispatch, crash retry, stale
+  worker timeout, single-cycle locking, and graceful shutdown.
+- [x] Add FastAPI integration tests for startup/shutdown runtime wiring,
+  manual cycle triggering, workers page status rendering, and the run-now
+  control.
+- [ ] Run the GitHub-backed e2e fixture against the new FastAPI `serve` path
+  before retiring the old server.
+- [ ] Remove the custom `BaseHTTPRequestHandler` dashboard, legacy templates,
+  and old static assets after FastAPI reaches route and runtime parity.
+
 Progress notes:
 
+- 2026-05-25: Extracted a shared `OrchestrationRuntime`, wired FastAPI lifespan
+  startup/shutdown, added `/workflow/run-cycle`, rendered runtime status on the
+  Workers page, and changed `symphony-dbcli serve` to launch FastAPI with the
+  runtime loop. `serve-web` is now dashboard-only debug mode and
+  `serve-legacy` keeps the custom HTTP server available while route parity is
+  completed. Local runtime remains single-process only until a DB-backed leader
+  lock is added.
 - 2026-05-24: Installed FastAPI, Uvicorn, SQLAlchemy, Alembic,
   python-multipart, and httpx with `uv`. Added a typed FastAPI app factory,
   route modules that match the dashboard hierarchy, separate CSS/JS assets,

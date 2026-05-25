@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "_draft_replies.html" import draft_replies %}
+{% block body %}
+{% if not detail %}
+<section class="panel empty-state">Issue not found.</section>
+{% else %}
+<section class="panel">
+  <div class="section-heading">
+    <div>
+      <h2>{{ detail.issue.title }}</h2>
+      <a href="{{ detail.issue.url }}" target="_blank" rel="noreferrer">{{ detail.issue.url }}</a>
+    </div>
+  </div>
+  {% if detail.labels %}
+  <p class="muted">
+    {% for row in detail.labels %}{{ row.label }}{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="section-heading">
+    <h2>Attempts</h2>
+    <span class="muted">{{ detail.attempts|length }}</span>
+  </div>
+  {% if detail.attempts %}
+  <div class="compact-table-wrap">
+    <table class="data-table compact-table">
+      <thead><tr><th>Attempt</th><th>Status</th><th>Phase</th><th>Turns</th><th>Errors</th><th>Duration</th></tr></thead>
+      <tbody>
+        {% for row in detail.attempts %}
+        <tr>
+          <td><a href="/attempts/{{ row.id }}">{{ row.id }}</a></td>
+          <td>{{ row.status }}</td>
+          <td>{{ row.current_phase or "-" }}</td>
+          <td>{{ row.turn_count }}</td>
+          <td>{{ row.error_count }}</td>
+          <td>{{ row.duration_ms|ms }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No attempts.</div>
+  {% endif %}
+</section>
+
+{{ draft_replies(detail.comments, show_attempt_link=True) }}
+{% endif %}
+{% endblock %}

@@ -92,12 +92,15 @@ def build_parser() -> argparse.ArgumentParser:
     poll_once = subcommands.add_parser("poll-once", help="Sync dispatchable GitHub issues into SQLite")
     poll_once.set_defaults(func=cmd_poll_once)
 
-    serve = subcommands.add_parser("serve", help="Run dashboard and polling loop")
-    serve.add_argument("--no-poll", action="store_true", help="Only run the dashboard")
+    serve = subcommands.add_parser("serve", help="Run the FastAPI dashboard and orchestration runtime")
     serve.set_defaults(func=cmd_serve)
 
-    serve_web = subcommands.add_parser("serve-web", help="Run the FastAPI dashboard")
+    serve_web = subcommands.add_parser("serve-web", help="Run the FastAPI dashboard without workers")
     serve_web.set_defaults(func=cmd_serve_web)
+
+    serve_legacy = subcommands.add_parser("serve-legacy", help="Run the legacy dashboard and polling loop")
+    serve_legacy.add_argument("--no-poll", action="store_true", help="Only run the legacy dashboard")
+    serve_legacy.set_defaults(func=cmd_serve_legacy)
 
     worker = subcommands.add_parser("worker", help="Worker commands")
     worker_sub = worker.add_subparsers(required=True)
@@ -403,6 +406,14 @@ def cmd_github_app_installations(args: argparse.Namespace) -> int:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
+    return _run_fastapi(args, run_runtime=True)
+
+
+def cmd_serve_web(args: argparse.Namespace) -> int:
+    return _run_fastapi(args, run_runtime=False)
+
+
+def cmd_serve_legacy(args: argparse.Namespace) -> int:
     config, _, store = _load_config_store_and_record(
         args.workflow,
         profile=_runtime_profile(args),
@@ -415,7 +426,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_serve_web(args: argparse.Namespace) -> int:
+def _run_fastapi(args: argparse.Namespace, *, run_runtime: bool) -> int:
     import uvicorn
 
     from .web.app import create_app
@@ -424,7 +435,7 @@ def cmd_serve_web(args: argparse.Namespace) -> int:
         args.workflow,
         profile=_runtime_profile(args),
     )
-    app = create_app(config, store, workflow_path=args.workflow)
+    app = create_app(config, store, workflow_path=args.workflow, run_runtime=run_runtime)
     uvicorn.run(app, host=config.dashboard.host, port=config.dashboard.port)
     return 0
 

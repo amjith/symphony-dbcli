@@ -10,7 +10,7 @@ The project is intentionally lightweight for the first implementation:
 - SQLite for durable state, workflow version history, and worker metrics.
 - GitHub Issues as the tracker.
 - Git worktrees for parallel per-issue coding workers.
-- A Jinja-rendered dashboard for status and operational questions.
+- A FastAPI + Jinja + HTMX dashboard for status and operational questions.
 
 ## Quick Start
 
@@ -25,23 +25,29 @@ The default workflow is safe for local development. GitHub writes require
 credentials before workers can label issues. Workers save research answers and
 code summaries as local review drafts instead of posting comments or opening
 pull requests automatically.
-Use the dashboard toggle named `Start queued work automatically` to control
-whether queued attempts are started by worker subprocesses.
+`serve-web` is available for dashboard-only debugging without starting workers.
+`serve-legacy` keeps the old custom HTTP server available while the cutover is
+finished.
 
 ## Worker Lifecycle
 
-`serve` runs the full local orchestration loop:
+`serve` runs the FastAPI dashboard and the full local orchestration loop:
 
-1. Poll GitHub Issues with the `symphony:todo` label.
-2. Claim eligible issues into durable SQLite attempts.
-3. Spawn worker subprocesses when `Start queued work automatically` is on.
-4. Record worker ids, PIDs, heartbeats, deadlines, attempts, turns, errors, and outcomes in SQLite.
-5. Mark crashed or timed-out workers as failed and queue a retry when `workers.retry_limit` allows it.
+1. Reload and record `WORKFLOW.md` when it changes.
+2. Sync configured sources into the SQLite-backed board.
+3. Advance ready workflow instances and claim queued work items.
+4. Spawn worker subprocesses automatically.
+5. Record worker ids, PIDs, heartbeats, deadlines, attempts, turns, errors, and outcomes in SQLite.
+6. Mark crashed or timed-out workers as failed and queue a retry when `workers.retry_limit` allows it.
 
 Worker lifecycle settings live in `WORKFLOW.md` under `[workers]`, including
 `poll_interval_seconds`, `heartbeat_interval_seconds`,
 `heartbeat_timeout_seconds`, `max_runtime_seconds`, `retry_limit`, and
 `shutdown_grace_seconds`.
+
+The pre-alpha runtime assumes a single FastAPI/Uvicorn process. Do not run
+multiple Uvicorn workers yet; that will require a DB-backed leader lock so only
+one process owns orchestration.
 
 ## Reviewing Results
 

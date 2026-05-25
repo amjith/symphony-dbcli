@@ -161,6 +161,19 @@ class WorkerSupervisor:
             started += 1
         return DispatchResult(started=started)
 
+    def terminate_tracked(self, config: WorkflowConfig) -> int:
+        stopped = 0
+        for worker_id, process in list(self.processes.items()):
+            process.terminate()
+            deadline = time.monotonic() + config.workers.shutdown_grace_seconds
+            while process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.1)
+            if process.poll() is None:
+                process.kill()
+            self.processes.pop(worker_id, None)
+            stopped += 1
+        return stopped
+
     def _worker_command(self, attempt_id: int) -> list[str]:
         command = [
             sys.executable,

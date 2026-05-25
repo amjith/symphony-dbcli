@@ -1,20 +1,182 @@
 {% extends "base.html" %}
-{% block body %}
-<section class="panel">
-  <div class="runtime-grid">
-    <div>
-      <span class="kicker">Automatic dispatch</span>
-      <strong>{{ "On" if runtime.start_queued_work_automatically else "Off" }}</strong>
-    </div>
-    <div>
-      <span class="kicker">Workspace</span>
-      <strong>{{ runtime.workspace_strategy }}</strong>
-    </div>
-    <div>
-      <span class="kicker">Root</span>
-      <code>{{ runtime.workspace_root }}</code>
-    </div>
-  </div>
-</section>
+{% block page_actions %}
+<form
+  action="/workflow/run-cycle"
+  method="post"
+  hx-post="/workflow/run-cycle"
+  hx-target="#workers-runtime"
+  hx-select="#workers-runtime"
+  hx-swap="outerHTML"
+>
+  <button type="submit">Run workflow cycle now</button>
+</form>
 {% endblock %}
+{% block body %}
+<div id="workers-runtime" class="workers-page">
+  {% if cycle_result %}
+  <section class="panel cycle-result {{ 'has-error' if cycle_result.error else '' }}">
+    <div class="section-heading">
+      <h2>Workflow Cycle</h2>
+      <span class="status-pill {{ 'is-warning' if cycle_result.skipped else 'is-error' if cycle_result.error else 'is-ok' }}">
+        {{ "Skipped" if cycle_result.skipped else "Failed" if cycle_result.error else "Completed" }}
+      </span>
+    </div>
+    {% if cycle_result.error %}
+    <p class="workflow-error">{{ cycle_result.error }}</p>
+    {% elif cycle_result.skipped %}
+    <p class="quiet">Skipped: {{ cycle_result.skipped_reason }}</p>
+    {% else %}
+    <div class="runtime-grid">
+      <div><span class="kicker">Issues Synced</span><strong>{{ cycle_result.synced }}</strong></div>
+      <div><span class="kicker">States Advanced</span><strong>{{ cycle_result.advanced }}</strong></div>
+      <div><span class="kicker">Work Claimed</span><strong>{{ cycle_result.claimed }}</strong></div>
+      <div><span class="kicker">Workers Started</span><strong>{{ cycle_result.started }}</strong></div>
+      <div><span class="kicker">Retries Queued</span><strong>{{ cycle_result.retried }}</strong></div>
+      <div><span class="kicker">Worktrees Cleaned</span><strong>{{ cycle_result.cleaned_worktrees }}</strong></div>
+    </div>
+    {% if cycle_result.cleanup_error %}
+    <p class="workflow-error">Worktree cleanup failed: {{ cycle_result.cleanup_error }}</p>
+    {% endif %}
+    {% endif %}
+  </section>
+  {% endif %}
 
+  <section class="panel">
+    <div class="section-heading">
+      <h2>Runtime</h2>
+      <span class="status-pill {{ 'is-ok' if runtime_status.runtime_attached else 'is-warning' }}">
+        {{ runtime_status.runtime_label }}
+      </span>
+    </div>
+    {% if runtime_status.message %}
+    <p class="quiet">{{ runtime_status.message }}</p>
+    {% endif %}
+    <div class="runtime-grid">
+      <div><span class="kicker">Loop</span><strong>{{ runtime_status.loop_label }}</strong></div>
+      <div><span class="kicker">Polling</span><strong>{{ runtime_status.polling_label }}</strong></div>
+      <div><span class="kicker">Current Cycle</span><strong>{{ runtime_status.cycle_label }}</strong></div>
+      <div><span class="kicker">Poll Interval</span><strong>{{ runtime_status.poll_interval_seconds }}s</strong></div>
+      <div>
+        <span class="kicker">Next Poll</span>
+        <strong>{{ runtime_status.next_poll_at if runtime_status.next_poll_at else "not scheduled" }}</strong>
+      </div>
+      <div><span class="kicker">Workspace</span><strong>{{ runtime.workspace_strategy }}</strong></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-heading">
+      <h2>Last Cycle</h2>
+      {% if runtime_status.last_cycle %}
+      <span class="status-pill {{ 'is-warning' if runtime_status.last_cycle.skipped else 'is-error' if runtime_status.last_cycle.error else 'is-ok' }}">
+        {{ "Skipped" if runtime_status.last_cycle.skipped else "Failed" if runtime_status.last_cycle.error else "Completed" }}
+      </span>
+      {% endif %}
+    </div>
+    {% if runtime_status.last_cycle %}
+    <div class="runtime-grid">
+      <div><span class="kicker">Trigger</span><strong>{{ runtime_status.last_cycle.trigger }}</strong></div>
+      <div><span class="kicker">Completed</span><strong>{{ runtime_status.last_cycle.completed_at }}</strong></div>
+      <div><span class="kicker">Issues Synced</span><strong>{{ runtime_status.last_cycle.synced }}</strong></div>
+      <div><span class="kicker">States Advanced</span><strong>{{ runtime_status.last_cycle.advanced }}</strong></div>
+      <div><span class="kicker">Workers Started</span><strong>{{ runtime_status.last_cycle.started }}</strong></div>
+      <div><span class="kicker">Retries Queued</span><strong>{{ runtime_status.last_cycle.retried }}</strong></div>
+    </div>
+    {% if runtime_status.last_cycle.error %}
+    <p class="workflow-error">{{ runtime_status.last_cycle.error }}</p>
+    {% elif runtime_status.last_cycle.skipped %}
+    <p class="quiet">Skipped: {{ runtime_status.last_cycle.skipped_reason }}</p>
+    {% endif %}
+    {% else %}
+    <p class="quiet">No cycle has run in this FastAPI process yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="section-heading">
+      <h2>Queue</h2>
+      <span class="quiet">{{ runtime_status.queued_attempt_count }} queued, {{ runtime_status.running_attempt_count }} running</span>
+    </div>
+    <div class="runtime-grid">
+      <div><span class="kicker">Worker Errors</span><strong>{{ runtime_status.error_count }}</strong></div>
+      <div><span class="kicker">Crashed</span><strong>{{ runtime_status.crashed_count }}</strong></div>
+      <div><span class="kicker">Timed Out</span><strong>{{ runtime_status.timed_out_count }}</strong></div>
+      <div><span class="kicker">Retries</span><strong>{{ runtime_status.retried_count }}</strong></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="section-heading">
+      <h2>Running Workers</h2>
+      <span class="quiet">{{ runtime_status.running_workers|length }} visible</span>
+    </div>
+    {% if runtime_status.running_workers %}
+    <div class="compact-table-wrap">
+      <table class="data-table compact-table">
+        <thead>
+          <tr>
+            <th>Worker</th>
+            <th>Attempt</th>
+            <th>Task</th>
+            <th>PID</th>
+            <th>Heartbeat</th>
+            <th>Deadline</th>
+            <th>Retries</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for worker in runtime_status.running_workers %}
+          <tr>
+            <td><code>{{ worker.worker_id }}</code></td>
+            <td><a href="/attempts/{{ worker.attempt_id }}">#{{ worker.attempt_id }}</a></td>
+            <td>{{ worker.repo }}#{{ worker.issue_number }} · {{ worker.task_type }}</td>
+            <td>{{ worker.pid }}</td>
+            <td>{{ worker.heartbeat_at if worker.heartbeat_at else "unknown" }}</td>
+            <td>{{ worker.deadline_at if worker.deadline_at else "none" }}</td>
+            <td>{{ worker.retry_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="quiet">No running workers.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="section-heading">
+      <h2>Queued Attempts</h2>
+      <span class="quiet">Showing {{ runtime_status.queued_attempts|length }} of {{ runtime_status.queued_attempt_count }}</span>
+    </div>
+    {% if runtime_status.queued_attempts %}
+    <div class="compact-table-wrap">
+      <table class="data-table compact-table">
+        <thead>
+          <tr>
+            <th>Attempt</th>
+            <th>Task</th>
+            <th>Phase</th>
+            <th>Queued</th>
+            <th>Retries</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for attempt in runtime_status.queued_attempts %}
+          <tr>
+            <td><a href="/attempts/{{ attempt.attempt_id }}">#{{ attempt.attempt_id }}</a></td>
+            <td>{{ attempt.repo }}#{{ attempt.issue_number }} · {{ attempt.task_type }}</td>
+            <td>{{ attempt.current_phase if attempt.current_phase else "queued" }}</td>
+            <td>{{ attempt.queued_at }}</td>
+            <td>{{ attempt.retry_count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="quiet">No queued attempts.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

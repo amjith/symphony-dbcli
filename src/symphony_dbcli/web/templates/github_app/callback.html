@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block body %}
+<section class="panel">
+  <div class="section-heading">
+    <h2>Manifest Code</h2>
+  </div>
+  {% if code %}
+  <p>Exchange this temporary code within one hour.</p>
+  <pre class="result-body">{{ code }}</pre>
+  <p class="muted">State: {{ state or "-" }}</p>
+  <pre class="result-body">uv run symphony-dbcli github-app convert --code {{ code }}</pre>
+  {% else %}
+  <div class="empty-state">GitHub did not return a code.</div>
+  {% endif %}
+</section>
+{% endblock %}
