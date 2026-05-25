@@ -36,6 +36,8 @@ def test_fastapi_dashboard_exposes_navigation_and_board(tmp_path: Path) -> None:
     assert 'href="/workflow"' in response.text
     assert "Backlog" in response.text
     assert "In Review" in response.text
+    assert 'name="backlog_q"' in response.text
+    assert 'name="todo_q"' in response.text
     assert "dbcli/litecli" in response.text
     assert "Sync Source" in response.text
     assert "auto dispatch" in response.text
@@ -137,6 +139,60 @@ def test_fastapi_source_sync_populates_selected_board_backlog(tmp_path: Path) ->
     assert "#8" in board.text
     assert "<span>2</span>" in board.text
     assert "No backlog items" not in board.text
+
+
+def test_fastapi_board_paginates_backlog_by_latest_github_update(tmp_path: Path) -> None:
+    client = _client(tmp_path, source_sync_client=ManyBacklogSyncClient())
+    source_id = _add_source(client, "dbcli/litecli")
+    _sync_source(client, source_id)
+
+    first_page = client.get(f"/board?source_id={source_id}")
+    second_page = client.get(f"/board?source_id={source_id}&backlog_page=2")
+
+    assert first_page.status_code == 200
+    assert "1-20 of 25" in first_page.text
+    assert "Backlog issue 025" in first_page.text
+    assert "Backlog issue 006" in first_page.text
+    assert "Backlog issue 005" not in first_page.text
+    assert "backlog_page=2" in first_page.text
+    assert second_page.status_code == 200
+    assert "21-25 of 25" in second_page.text
+    assert "Backlog issue 005" in second_page.text
+    assert "Backlog issue 001" in second_page.text
+    assert "Backlog issue 006" not in second_page.text
+
+
+def test_fastapi_board_searches_backlog_with_sqlite_fts_body_matches(tmp_path: Path) -> None:
+    client = _client(tmp_path, source_sync_client=SearchableSourceSyncClient())
+    source_id = _add_source(client, "dbcli/litecli")
+    _sync_source(client, source_id)
+
+    board = client.get(f"/board?source_id={source_id}&backlog_q=ftsneedle")
+
+    assert board.status_code == 200
+    assert "Cache cleanup" in board.text
+    assert "Another bug" not in board.text
+    assert 'value="ftsneedle"' in board.text
+    assert "1-1 of 1" in board.text
+
+
+def test_fastapi_board_searches_work_columns_with_sqlite_fts(tmp_path: Path) -> None:
+    client = _client(tmp_path, source_sync_client=SearchableSourceSyncClient())
+    source_id = _add_source(client, "dbcli/litecli")
+    _sync_source(client, source_id)
+    matching_source_item_id = _source_item_id_for(client, source_id, "Cache cleanup")
+    other_source_item_id = _source_item_id_for(client, source_id, "Another bug")
+    _activate_source_item(client, matching_source_item_id, task_type="code")
+    _activate_source_item(client, other_source_item_id, task_type="code")
+
+    board = client.get(f"/board?source_id={source_id}&todo_q=ftsneedle")
+
+    assert board.status_code == 200
+    assert "Cache cleanup" in board.text
+    assert "Another bug" not in board.text
+    assert 'value="ftsneedle"' in board.text
+    assert "work item #1" in board.text
+    assert "work item #2" not in board.text
 
 
 def test_fastapi_source_item_activation_creates_todo_work_item(tmp_path: Path) -> None:
@@ -539,6 +595,58 @@ class FakeSourceSyncClient:
                 body="pr body",
             )
         ]
+
+
+class ManyBacklogSyncClient:
+    def list_issues(self, repo: str, labels: list[str] | None = None) -> list[GitHubIssue]:
+        return [
+            GitHubIssue(
+                repo=repo,
+                number=number,
+                title=f"Backlog issue {number:03d}",
+                body=f"Body for backlog issue {number:03d}",
+                url=f"https://github.com/{repo}/issues/{number}",
+                state="open",
+                labels=["bug"],
+                author="alice",
+                updated_at=f"2026-05-{number:02d}T01:00:00Z",
+            )
+            for number in range(1, 26)
+        ]
+
+    def list_pull_requests(self, repo: str, *, state: str = "open") -> list[PullRequest]:
+        return []
+
+
+class SearchableSourceSyncClient:
+    def list_issues(self, repo: str, labels: list[str] | None = None) -> list[GitHubIssue]:
+        return [
+            GitHubIssue(
+                repo=repo,
+                number=245,
+                title="Cache cleanup",
+                body="The issue contents mention ftsneedle only in the body.",
+                url=f"https://github.com/{repo}/issues/245",
+                state="open",
+                labels=["bug"],
+                author="alice",
+                updated_at="2026-05-25T01:00:00Z",
+            ),
+            GitHubIssue(
+                repo=repo,
+                number=246,
+                title="Another bug",
+                body="Plain issue body.",
+                url=f"https://github.com/{repo}/issues/246",
+                state="open",
+                labels=["bug"],
+                author="bob",
+                updated_at="2026-05-24T01:00:00Z",
+            ),
+        ]
+
+    def list_pull_requests(self, repo: str, *, state: str = "open") -> list[PullRequest]:
+        return []
 
 
 class FilteredSourceSyncClient:

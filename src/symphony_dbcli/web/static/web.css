@@ -284,6 +284,57 @@ h2 {
   font-weight: 700;
 }
 
+.column-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content max-content;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.column-search input[type="search"] {
+  min-width: 0;
+  height: 32px;
+  padding: 6px 8px;
+}
+
+.column-search button {
+  min-height: 32px;
+  padding: 5px 9px;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pager div {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pager-link {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.pager-link.is-disabled {
+  opacity: 0.5;
+}
+
 .empty-state {
   margin: 12px;
   border: 1px dashed #c6ccd6;
@@ -368,6 +419,15 @@ h2 {
   font-size: 12px;
   font-weight: 800;
   text-decoration: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 
 .card-actions {

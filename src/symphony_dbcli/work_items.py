@@ -18,6 +18,7 @@ from .models import (
     WorkItemRun,
     WorkItemStateEvent,
 )
+from .search import matching_source_item_ids
 
 KANBAN_STATES = ("todo", "in_progress", "in_review", "done")
 TASK_TYPES = frozenset({"research", "code", "operations"})
@@ -271,16 +272,22 @@ class WorkItemRepository:
             session.refresh(work_item)
             return _work_item_view(work_item, source_item)
 
-    def list_by_state(self, source_id: int, state: str) -> list[WorkItemView]:
+    def list_by_state(self, source_id: int, state: str, *, query: str = "") -> list[WorkItemView]:
         with self._session_factory() as session:
+            matching_work_item_ids = _matching_work_item_ids(session, source_id, query)
+            if query.strip() and not matching_work_item_ids:
+                return []
+            conditions = [
+                WorkItem.source_id == source_id,
+                WorkItem.state == state,
+                WorkItem.disposition == "active",
+            ]
+            if matching_work_item_ids:
+                conditions.append(WorkItem.id.in_(matching_work_item_ids))
             rows = session.execute(
                 select(WorkItem, SourceItem)
                 .join(SourceItem, WorkItem.primary_source_item_id == SourceItem.id)
-                .where(
-                    WorkItem.source_id == source_id,
-                    WorkItem.state == state,
-                    WorkItem.disposition == "active",
-                )
+                .where(*conditions)
                 .order_by(WorkItem.updated_at.desc(), WorkItem.id.desc())
             ).all()
             return [_work_item_view(work_item, source_item) for work_item, source_item in rows]
@@ -725,6 +732,25 @@ def _work_item_view(work_item: WorkItem, source_item: SourceItem) -> WorkItemVie
         disposition_note=work_item.disposition_note,
         created_at=work_item.created_at,
         updated_at=work_item.updated_at,
+    )
+
+
+def _matching_work_item_ids(session: Session, source_id: int, query: str) -> set[int]:
+    if not query.strip():
+        return set()
+    source_item_ids = matching_source_item_ids(session, source_id, query)
+    if not source_item_ids:
+        return set()
+    return set(
+        session.scalars(
+            select(WorkItemLink.work_item_id)
+            .join(WorkItem, WorkItemLink.work_item_id == WorkItem.id)
+            .where(
+                WorkItem.source_id == source_id,
+                WorkItemLink.source_item_id.in_(source_item_ids),
+                WorkItem.disposition == "active",
+            )
+        )
     )
 
 

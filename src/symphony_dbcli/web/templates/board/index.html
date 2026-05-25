@@ -43,6 +43,40 @@
       <h2>{{ column.label }}</h2>
       <span>{{ column.count }}</span>
     </div>
+    <form class="column-search" method="get" action="/board" role="search">
+      {% for name, value in column.hidden_params %}
+      <input type="hidden" name="{{ name }}" value="{{ value }}" />
+      {% endfor %}
+      <label class="sr-only" for="search-{{ column.name }}">Search {{ column.label }}</label>
+      <input
+        id="search-{{ column.name }}"
+        type="search"
+        name="{{ column.query_param }}"
+        value="{{ column.query }}"
+        placeholder="Search {{ column.label|lower }}"
+      />
+      <button type="submit">Search</button>
+      {% if column.query %}
+      <a class="text-action" href="{{ column.clear_url }}">Clear</a>
+      {% endif %}
+    </form>
+    {% if column.name == "backlog" %}
+    <div class="pager" aria-label="Backlog pagination">
+      <span>{{ column.page_start }}-{{ column.page_end }} of {{ column.count }}</span>
+      <div>
+        {% if column.previous_url %}
+        <a class="pager-link" href="{{ column.previous_url }}">Prev</a>
+        {% else %}
+        <span class="pager-link is-disabled">Prev</span>
+        {% endif %}
+        {% if column.next_url %}
+        <a class="pager-link" href="{{ column.next_url }}">Next</a>
+        {% else %}
+        <span class="pager-link is-disabled">Next</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
     {% if column.source_items %}
     <div class="source-card-list kanban-list" data-state="{{ column.name }}">
       {% for item in column.source_items %}

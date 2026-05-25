@@ -4,6 +4,7 @@ import json
 import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from math import ceil
 from typing import Any, Protocol, cast
 
 from sqlalchemy import select
@@ -23,8 +24,10 @@ from .models import (
     WorkItemStateEvent,
 )
 from .review_actions import body_links_issue, issue_link_marker
+from .search import matching_source_item_ids, rebuild_source_item_search
 
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+SOURCE_ITEM_PAGE_SIZE = 20
 
 
 class SourceValidationError(ValueError):
@@ -165,6 +168,41 @@ class SourceItemView:
 
 
 @dataclass(frozen=True)
+class SourceItemPage:
+    items: list[SourceItemView]
+    total: int
+    page: int
+    limit: int
+    query: str
+
+    @property
+    def has_previous(self) -> bool:
+        return self.page > 1
+
+    @property
+    def has_next(self) -> bool:
+        return self.page * self.limit < self.total
+
+    @property
+    def previous_page(self) -> int:
+        return max(1, self.page - 1)
+
+    @property
+    def next_page(self) -> int:
+        return self.page + 1
+
+    @property
+    def start_index(self) -> int:
+        if self.total == 0:
+            return 0
+        return ((self.page - 1) * self.limit) + 1
+
+    @property
+    def end_index(self) -> int:
+        return min(self.page * self.limit, self.total)
+
+
+@dataclass(frozen=True)
 class SourceSyncSummary:
     source_id: int
     run_id: int
@@ -289,31 +327,63 @@ class SourceRepository:
             return [SourceItemView.from_model(row) for row in rows]
 
     def backlog_source_items(self, source_id: int) -> list[SourceItemView]:
+        return self.backlog_source_item_page(source_id).items
+
+    def backlog_source_item_page(
+        self,
+        source_id: int,
+        *,
+        query: str = "",
+        page: int = 1,
+        limit: int = SOURCE_ITEM_PAGE_SIZE,
+    ) -> SourceItemPage:
+        page_number = _positive_page(page)
+        page_limit = _positive_page_limit(limit)
         linked_active_source_items = (
             select(WorkItemLink.source_item_id)
             .join(WorkItem, WorkItemLink.work_item_id == WorkItem.id)
             .where(WorkItem.state != "done")
         )
         with self._session_factory() as session:
+            visible_match_ids = _visible_match_ids(session, source_id, query)
+            if query.strip() and not visible_match_ids:
+                return SourceItemPage(items=[], total=0, page=1, limit=page_limit, query=query.strip())
+            conditions = [
+                SourceItem.source_id == source_id,
+                SourceItem.state == "open",
+                SourceItem.disposition == "active",
+                ~SourceItem.id.in_(linked_active_source_items),
+            ]
+            if visible_match_ids:
+                conditions.append(SourceItem.id.in_(visible_match_ids))
             rows = list(
                 session.scalars(
                     select(SourceItem)
-                    .where(
-                        SourceItem.source_id == source_id,
-                        SourceItem.state == "open",
-                        SourceItem.disposition == "active",
-                        ~SourceItem.id.in_(linked_active_source_items),
+                    .where(*conditions)
+                    .order_by(
+                        SourceItem.github_updated_at.desc(),
+                        SourceItem.updated_at.desc(),
+                        SourceItem.id.desc(),
                     )
-                    .order_by(SourceItem.kind.asc(), SourceItem.number.desc())
                 )
             )
             linked_prs_by_issue_id = _linked_prs_by_issue_id(session, source_id, rows)
             linked_pr_ids = {item.id for linked in linked_prs_by_issue_id.values() for item in linked}
-            return [
+            visible_items = [
                 _source_item_view_with_links(row, linked_prs_by_issue_id.get(row.id, []))
                 for row in rows
                 if row.id not in linked_pr_ids
             ]
+            total = len(visible_items)
+            page_number = _clamped_page(page_number, total, page_limit)
+            start = (page_number - 1) * page_limit
+            return SourceItemPage(
+                items=visible_items[start : start + page_limit],
+                total=total,
+                page=page_number,
+                limit=page_limit,
+                query=query.strip(),
+            )
 
     def linked_source_items(self, source_item_id: int) -> list[SourceItemView]:
         with self._session_factory() as session:
@@ -463,6 +533,7 @@ class SourceRepository:
                         stale_item.updated_at = now
             _record_issue_pr_links(session, source_id, now)
             _auto_complete_work_items(session, source_id, now)
+            rebuild_source_item_search(session, source_id)
             session.commit()
 
 
@@ -580,6 +651,24 @@ def _source_item_view_with_links(item: SourceItem, linked_items: list[SourceItem
         SourceItemView.from_model(item),
         linked_items=tuple(SourceItemView.from_model(linked_item) for linked_item in linked_items),
     )
+
+
+def _visible_match_ids(session: Session, source_id: int, query: str) -> set[int]:
+    if not query.strip():
+        return set()
+    matched_ids = matching_source_item_ids(session, source_id, query)
+    if not matched_ids:
+        return set()
+    linked_issue_ids = set(
+        session.scalars(
+            select(SourceItemLink.source_item_id).where(
+                SourceItemLink.source_id == source_id,
+                SourceItemLink.relationship == "issue_pr",
+                SourceItemLink.linked_source_item_id.in_(matched_ids),
+            )
+        )
+    )
+    return matched_ids | linked_issue_ids
 
 
 def _linked_prs_by_issue_id(
@@ -868,3 +957,17 @@ def _positive_int(value: str, label: str) -> int | None:
     if parsed < 1:
         raise SourceValidationError(f"{label} must be at least 1.")
     return parsed
+
+
+def _positive_page(page: int) -> int:
+    return max(1, page)
+
+
+def _positive_page_limit(limit: int) -> int:
+    return min(100, max(1, limit))
+
+
+def _clamped_page(page: int, total: int, limit: int) -> int:
+    if total == 0:
+        return 1
+    return min(page, ceil(total / limit))
