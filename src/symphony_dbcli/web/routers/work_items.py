@@ -191,6 +191,7 @@ def _detail_context(request: Request, work_item_id: int, error: str) -> dict[str
         raise HTTPException(status_code=404, detail="Work item not found")
     context = page_context(request, title=f"Work Item #{work_item_id}", active="work_items")
     context["work_item"] = work_item
+    context["runs"] = work_item_repository(request).list_runs(work_item_id)
     linked_source_items = work_item_repository(request).linked_source_items(work_item_id)
     context["linked_source_items"] = linked_source_items
     context["linked_pull_requests"] = [item for item in linked_source_items if item.kind == "pull_request"]

@@ -58,6 +58,64 @@
   </dl>
 </section>
 
+<section class="panel flow-panel">
+  <div class="section-heading">
+    <h2>Runs / Attempts</h2>
+    <span class="muted">{{ runs|length }}</span>
+  </div>
+  {% if runs %}
+  <div class="compact-table-wrap">
+    <table class="data-table compact-table">
+      <thead>
+        <tr>
+          <th>Run</th>
+          <th>Attempt</th>
+          <th>Task</th>
+          <th>Trigger</th>
+          <th>Status</th>
+          <th>Started</th>
+          <th>Completed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in runs %}
+        <tr>
+          <td>#{{ run.id }}</td>
+          <td>
+            {% if run.attempt_id %}
+            <a href="/attempts/{{ run.attempt_id }}">Attempt #{{ run.attempt_id }}</a>
+            {% else %}
+            <span class="muted">not claimed</span>
+            {% endif %}
+          </td>
+          <td>{{ run.task_type }}</td>
+          <td>{{ run.trigger }}</td>
+          <td>{{ run.status }}</td>
+          <td>{{ run.started_at or "-" }}</td>
+          <td>{{ run.completed_at or "-" }}</td>
+        </tr>
+        {% if run.reasons or run.user_hint %}
+        <tr>
+          <td></td>
+          <td colspan="6">
+            {% if run.reasons %}
+            <span class="muted">Reasons: {{ run.reasons|join(", ") }}</span>
+            {% endif %}
+            {% if run.user_hint %}
+            <span class="muted">Hint: {{ run.user_hint }}</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No runs have been queued for this work item.</div>
+  {% endif %}
+</section>
+
 <section id="move-work" class="panel flow-panel">
   <h2>Move Work</h2>
   <form class="stacked-form" method="post" action="/work-items/{{ work_item.id }}/move">

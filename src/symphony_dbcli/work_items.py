@@ -109,6 +109,22 @@ class OperationRunView:
 
 
 @dataclass(frozen=True)
+class WorkItemRunView:
+    id: int
+    attempt_id: int | None
+    workflow_instance_id: int | None
+    task_type: str
+    trigger: str
+    status: str
+    reasons: list[str]
+    user_hint: str
+    started_at: str | None
+    completed_at: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
 class WorkItemRunClaim:
     id: int
     work_item_id: int
@@ -322,6 +338,15 @@ class WorkItemRepository:
                 )
                 for run, work_item in rows
             ]
+
+    def list_runs(self, work_item_id: int) -> list[WorkItemRunView]:
+        with self._session_factory() as session:
+            runs = session.scalars(
+                select(WorkItemRun)
+                .where(WorkItemRun.work_item_id == work_item_id)
+                .order_by(WorkItemRun.created_at.desc(), WorkItemRun.id.desc())
+            ).all()
+            return [_work_item_run_view(run) for run in runs]
 
     def next_queued_run(self, *, blocked_repos: set[str] | None = None) -> WorkItemRunClaim | None:
         with self._session_factory() as session:
@@ -778,6 +803,23 @@ def _work_item_run_claim(
         active_pr_number=None if active_pr is None else active_pr.number,
         active_pr_url="" if active_pr is None else active_pr.url,
         active_pr_title="" if active_pr is None else active_pr.title,
+    )
+
+
+def _work_item_run_view(run: WorkItemRun) -> WorkItemRunView:
+    return WorkItemRunView(
+        id=run.id,
+        attempt_id=run.attempt_id,
+        workflow_instance_id=run.workflow_instance_id,
+        task_type=run.task_type,
+        trigger=run.trigger,
+        status=run.status,
+        reasons=cast(list[str], json.loads(run.reasons_json)),
+        user_hint=run.user_hint,
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
     )
 
 

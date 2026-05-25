@@ -370,6 +370,63 @@ def test_fastapi_source_item_activation_creates_todo_work_item(tmp_path: Path) -
     assert "code" in board.text
     assert "Fix completion crash" in work_items.text
     assert "Prefer unit tests." in detail.text
+    assert "Runs / Attempts" in detail.text
+    assert "not claimed" in detail.text
+
+
+def test_fastapi_work_item_detail_links_attempts(tmp_path: Path) -> None:
+    client = _client(tmp_path, source_sync_client=FakeSourceSyncClient())
+    source_id = _add_source(client, "dbcli/litecli")
+    _sync_source(client, source_id)
+    source_item_id = _source_item_id_for(client, source_id, "Fix completion crash")
+    _activate_source_item(client, source_item_id, task_type="code")
+    store = Store(str(tmp_path / "symphony.db"))
+    store.upsert_issue(
+        IssueSnapshot(
+            repo="dbcli/litecli",
+            number=245,
+            title="Fix completion crash",
+            url="https://github.com/dbcli/litecli/issues/245",
+            state="open",
+            labels=[],
+            task_type="code",
+        )
+    )
+    attempt_id = store.create_attempt(
+        repo="dbcli/litecli",
+        issue_number=245,
+        task_type="code",
+        workflow_version_id=None,
+        work_item_id=1,
+        work_item_run_id=1,
+        status="review",
+    )
+    workflow_instance_id = store.create_workflow_instance(
+        repo="dbcli/litecli",
+        issue_number=245,
+        task_type="code",
+        workflow_version_id=None,
+        initial_state="review",
+        attempt_id=attempt_id,
+        work_item_id=1,
+        work_item_run_id=1,
+    )
+    session_factory = create_session_factory(create_db_engine(str(tmp_path / "symphony.db")))
+    with session_factory() as session:
+        run = session.get(WorkItemRun, 1)
+        assert run is not None
+        run.attempt_id = attempt_id
+        run.workflow_instance_id = workflow_instance_id
+        run.status = "needs_review"
+        session.commit()
+
+    detail = client.get("/work-items/1")
+
+    assert detail.status_code == 200
+    assert "Runs / Attempts" in detail.text
+    assert f'href="/attempts/{attempt_id}"' in detail.text
+    assert f"Attempt #{attempt_id}" in detail.text
+    assert "needs_review" in detail.text
 
 
 def test_fastapi_operations_page_lists_operation_runs(tmp_path: Path) -> None:
@@ -420,7 +477,7 @@ def test_fastapi_work_item_move_records_review_rerun_reasons(tmp_path: Path) -> 
     assert review_move.status_code == 303
     assert rerun_move.status_code == 303
     assert "In Progress" in detail.text
-    assert "Reviewer asked for tests." not in detail.text
+    assert "Reviewer asked for tests." in detail.text
     assert "work item #1" in board.text
     assert "No in progress items" not in board.text
     assert [event.to_state for event in events[-2:]] == ["in_review", "in_progress"]
