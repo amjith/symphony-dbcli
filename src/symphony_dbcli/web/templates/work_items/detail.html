@@ -91,4 +91,15 @@
     </div>
   </form>
 </section>
+
+<section class="panel flow-panel">
+  <h2>Archive</h2>
+  <form class="stacked-form" method="post" action="/work-items/{{ work_item.id }}/archive">
+    <label for="archive-note">Note</label>
+    <textarea id="archive-note" name="note" rows="2" placeholder="Optional archive reason"></textarea>
+    <div class="form-actions">
+      <button type="submit">Archive Work Item</button>
+    </div>
+  </form>
+</section>
 {% endblock %}

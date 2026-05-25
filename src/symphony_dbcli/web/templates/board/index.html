@@ -64,7 +64,12 @@
           </ul>
         </details>
         {% endif %}
-        <a class="text-action" href="/source-items/{{ item.id }}/activate">Queue</a>
+        <div class="card-actions">
+          <a class="text-action" href="/source-items/{{ item.id }}/activate">Queue</a>
+          <form method="post" action="/source-items/{{ item.id }}/ignore">
+            <button class="text-button" type="submit">Ignore</button>
+          </form>
+        </div>
       </article>
       {% endfor %}
     </div>
@@ -78,6 +83,9 @@
         </div>
         <strong><a href="/work-items/{{ item.id }}">{{ item.title }}</a></strong>
         <span class="muted">{{ item.task_type }} · work item #{{ item.id }}</span>
+        <form method="post" action="/work-items/{{ item.id }}/archive">
+          <button class="text-button" type="submit">Archive</button>
+        </form>
       </article>
       {% endfor %}
     </div>

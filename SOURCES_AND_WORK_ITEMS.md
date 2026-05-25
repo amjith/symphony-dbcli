@@ -839,9 +839,9 @@ Likely new primitives:
   and PR body marker.
 - [x] Group linked issue/PR cards in the board and add expandable detail view.
 - [x] Support multiple linked PRs with one active PR selector.
-- [ ] Auto-mark work items done when linked PRs merge or linked issues close
+- [x] Auto-mark work items done when linked PRs merge or linked issues close
   externally, recording outcome.
-- [ ] Add opt-in archive/ignore support for source items and work items.
+- [x] Add opt-in archive/ignore support for source items and work items.
 - [ ] Update Ask Symphony to answer source, work item, and board-state
   questions.
 - [x] Build fast local tests for source sync, backlog-to-todo activation, and

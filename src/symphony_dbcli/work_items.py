@@ -59,6 +59,8 @@ class WorkItemView:
     state: str
     task_type: str
     user_hint: str
+    disposition: str
+    disposition_note: str
     created_at: str
     updated_at: str
 
@@ -103,6 +105,7 @@ class WorkItemRepository:
                 .where(
                     WorkItemLink.source_item_id == activation.source_item_id,
                     WorkItem.state != DONE_STATE,
+                    WorkItem.disposition == "active",
                 )
                 .order_by(WorkItem.id.desc())
             )
@@ -186,7 +189,11 @@ class WorkItemRepository:
             rows = session.execute(
                 select(WorkItem, SourceItem)
                 .join(SourceItem, WorkItem.primary_source_item_id == SourceItem.id)
-                .where(WorkItem.source_id == source_id, WorkItem.state == state)
+                .where(
+                    WorkItem.source_id == source_id,
+                    WorkItem.state == state,
+                    WorkItem.disposition == "active",
+                )
                 .order_by(WorkItem.updated_at.desc(), WorkItem.id.desc())
             ).all()
             return [_work_item_view(work_item, source_item) for work_item, source_item in rows]
@@ -196,6 +203,7 @@ class WorkItemRepository:
             rows = session.execute(
                 select(WorkItem, SourceItem)
                 .join(SourceItem, WorkItem.primary_source_item_id == SourceItem.id)
+                .where(WorkItem.disposition == "active")
                 .order_by(WorkItem.updated_at.desc(), WorkItem.id.desc())
             ).all()
             return [_work_item_view(work_item, source_item) for work_item, source_item in rows]
@@ -210,6 +218,38 @@ class WorkItemRepository:
             if row is None:
                 return None
             work_item, source_item = row
+            return _work_item_view(work_item, source_item)
+
+    def archive_work_item(self, work_item_id: int, note: str = "") -> WorkItemView:
+        now = utc_now()
+        with self._session_factory() as session:
+            row = session.execute(
+                select(WorkItem, SourceItem)
+                .join(SourceItem, WorkItem.primary_source_item_id == SourceItem.id)
+                .where(WorkItem.id == work_item_id)
+            ).one_or_none()
+            if row is None:
+                raise WorkItemError("Work item not found.")
+            work_item, source_item = row
+            previous_state = work_item.state
+            work_item.disposition = "archived"
+            work_item.disposition_note = note.strip()
+            work_item.disposition_at = now
+            work_item.state = "done"
+            work_item.outcome = "archived_by_user"
+            work_item.updated_at = now
+            session.add(
+                WorkItemStateEvent(
+                    work_item_id=work_item.id,
+                    from_state=previous_state,
+                    to_state="done",
+                    reasons_json="[]",
+                    note=work_item.disposition_note,
+                    created_at=now,
+                )
+            )
+            session.commit()
+            session.refresh(work_item)
             return _work_item_view(work_item, source_item)
 
     def linked_source_items(self, work_item_id: int) -> list[WorkItemLinkedSourceView]:
@@ -347,6 +387,8 @@ def _work_item_view(work_item: WorkItem, source_item: SourceItem) -> WorkItemVie
         state=work_item.state,
         task_type=work_item.task_type,
         user_hint=work_item.user_hint,
+        disposition=work_item.disposition,
+        disposition_note=work_item.disposition_note,
         created_at=work_item.created_at,
         updated_at=work_item.updated_at,
     )

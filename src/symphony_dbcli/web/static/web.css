@@ -370,6 +370,27 @@ h2 {
   text-decoration: none;
 }
 
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.text-button {
+  min-height: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.text-button:hover {
+  background: transparent;
+  color: var(--danger);
+}
+
 .inline-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;

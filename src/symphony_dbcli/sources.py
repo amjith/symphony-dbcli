@@ -13,7 +13,15 @@ from sqlalchemy.orm import Session
 from .clock import utc_now
 from .db import SessionFactory
 from .github import GitHubIssue, PullRequest
-from .models import Source, SourceItem, SourceItemLink, SourceSyncRun, WorkItem, WorkItemLink
+from .models import (
+    Source,
+    SourceItem,
+    SourceItemLink,
+    SourceSyncRun,
+    WorkItem,
+    WorkItemLink,
+    WorkItemStateEvent,
+)
 from .review_actions import body_links_issue, issue_link_marker
 
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
@@ -116,6 +124,8 @@ class SourceItemView:
     author: str
     labels: list[str]
     github_updated_at: str
+    disposition: str
+    disposition_note: str
     synced_at: str
     linked_items: tuple[SourceItemView, ...] = ()
 
@@ -132,6 +142,8 @@ class SourceItemView:
             author=item.author,
             labels=cast(list[str], json.loads(item.labels_json)),
             github_updated_at=item.github_updated_at,
+            disposition=item.disposition,
+            disposition_note=item.disposition_note,
             synced_at=item.synced_at,
         )
 
@@ -267,7 +279,11 @@ class SourceRepository:
         with self._session_factory() as session:
             rows = session.scalars(
                 select(SourceItem)
-                .where(SourceItem.source_id == source_id, SourceItem.state == "open")
+                .where(
+                    SourceItem.source_id == source_id,
+                    SourceItem.state == "open",
+                    SourceItem.disposition == "active",
+                )
                 .order_by(SourceItem.kind.asc(), SourceItem.number.desc())
             ).all()
             return [SourceItemView.from_model(row) for row in rows]
@@ -285,6 +301,7 @@ class SourceRepository:
                     .where(
                         SourceItem.source_id == source_id,
                         SourceItem.state == "open",
+                        SourceItem.disposition == "active",
                         ~SourceItem.id.in_(linked_active_source_items),
                     )
                     .order_by(SourceItem.kind.asc(), SourceItem.number.desc())
@@ -317,6 +334,20 @@ class SourceRepository:
                 source_item,
                 _linked_prs_for_issue(session, source_item),
             )
+
+    def ignore_source_item(self, source_item_id: int, note: str = "") -> SourceItemView:
+        now = utc_now()
+        with self._session_factory() as session:
+            source_item = session.get(SourceItem, source_item_id)
+            if source_item is None:
+                raise SourceValidationError("Source item not found.")
+            source_item.disposition = "ignored"
+            source_item.disposition_note = note.strip()
+            source_item.disposition_at = now
+            source_item.updated_at = now
+            session.commit()
+            session.refresh(source_item)
+            return SourceItemView.from_model(source_item)
 
     def start_sync_run(self, source_id: int) -> int:
         now = utc_now()
@@ -431,6 +462,7 @@ class SourceRepository:
                         stale_item.state = "closed"
                         stale_item.updated_at = now
             _record_issue_pr_links(session, source_id, now)
+            _auto_complete_work_items(session, source_id, now)
             session.commit()
 
 
@@ -712,6 +744,54 @@ def _ensure_work_item_link(
                 created_at=now,
             )
         )
+
+
+def _auto_complete_work_items(session: Session, source_id: int, now: str) -> None:
+    work_items = list(
+        session.scalars(
+            select(WorkItem).where(
+                WorkItem.source_id == source_id,
+                WorkItem.state != "done",
+                WorkItem.disposition == "active",
+            )
+        )
+    )
+    for work_item in work_items:
+        primary_item = session.get(SourceItem, work_item.primary_source_item_id)
+        active_pr = (
+            session.get(SourceItem, work_item.active_pr_source_item_id)
+            if work_item.active_pr_source_item_id
+            else None
+        )
+        outcome = _completion_outcome(primary_item, active_pr)
+        if not outcome:
+            continue
+        previous_state = work_item.state
+        work_item.state = "done"
+        work_item.outcome = outcome
+        work_item.updated_at = now
+        session.add(
+            WorkItemStateEvent(
+                work_item_id=work_item.id,
+                from_state=previous_state,
+                to_state="done",
+                reasons_json="[]",
+                note=outcome,
+                created_at=now,
+            )
+        )
+
+
+def _completion_outcome(primary_item: SourceItem | None, active_pr: SourceItem | None) -> str:
+    if primary_item is None:
+        return "primary_source_missing"
+    if primary_item.kind == "issue" and primary_item.state != "open":
+        return "issue_closed_external"
+    if active_pr and active_pr.state != "open":
+        return "linked_pr_closed_or_merged_external"
+    if primary_item.kind == "pull_request" and primary_item.state != "open":
+        return "pull_request_closed_or_merged_external"
+    return ""
 
 
 def _filtered_items(items: list[SourceItemUpsert], filters: SourceFilters) -> list[SourceItemUpsert]:

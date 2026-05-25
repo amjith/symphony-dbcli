@@ -617,9 +617,9 @@ Implementation checklist:
   PR body marker.
 - [x] Add grouped issue/PR cards with an expandable detail view and active PR
   selector.
-- [ ] Auto-mark work items done on external PR merge or issue close with
+- [x] Auto-mark work items done on external PR merge or issue close with
   explicit outcome.
-- [ ] Add ignore/archive support for source items.
+- [x] Add ignore/archive support for source items and work items.
 - [ ] Update Ask Symphony for source, work item, and kanban-state questions.
 - [x] Add fast local tests for source sync, backlog-to-todo activation, and
   kanban state transitions.
@@ -664,6 +664,10 @@ Progress notes:
 - 2026-05-25: Added source-item issue/PR links, active PR selection on work
   items, grouped backlog cards for linked issues and PRs, and sync-time
   attachment of newly linked PRs to existing active issue work items.
+- 2026-05-25: Added source/work item dispositions for ignored and archived
+  records, board actions to ignore backlog cards and archive work items, and
+  sync-time auto-completion when a primary issue or active PR disappears from
+  the open GitHub source set.
 
 ## Durable Cross-Project Spec
 

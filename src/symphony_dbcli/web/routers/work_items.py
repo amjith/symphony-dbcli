@@ -97,6 +97,28 @@ def select_active_pr(
     )
 
 
+@router.post("/work-items/{work_item_id}/archive")
+def archive_work_item(
+    request: Request,
+    work_item_id: int,
+    note: Annotated[str, Form()] = "",
+) -> Response:
+    try:
+        work_item = work_item_repository(request).archive_work_item(work_item_id, note)
+    except WorkItemError as exc:
+        context = _detail_context(request, work_item_id, error=str(exc))
+        return templates.TemplateResponse(
+            request=request,
+            name="work_items/detail.html",
+            context=context,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    return RedirectResponse(
+        f"/board?source_id={work_item.source_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/source-items/{source_item_id}/activate")
 def activate_form(request: Request, source_item_id: int) -> Response:
     source_item = source_repository(request).get_source_item(source_item_id)
@@ -146,6 +168,19 @@ def activate(
         )
     return RedirectResponse(
         f"/board?source_id={work_item.source_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/source-items/{source_item_id}/ignore")
+def ignore_source_item(
+    request: Request,
+    source_item_id: int,
+    note: Annotated[str, Form()] = "",
+) -> Response:
+    source_item = source_repository(request).ignore_source_item(source_item_id, note)
+    return RedirectResponse(
+        f"/board?source_id={source_item.source_id}",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 

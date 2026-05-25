@@ -10,7 +10,14 @@ from sqlalchemy import select
 from symphony_dbcli.config import DatabaseConfig, default_config
 from symphony_dbcli.db import create_db_engine, create_session_factory
 from symphony_dbcli.github import GitHubIssue, PullRequest
-from symphony_dbcli.models import SourceItemLink, WorkItem, WorkItemLink, WorkItemRun, WorkItemStateEvent
+from symphony_dbcli.models import (
+    SourceItem,
+    SourceItemLink,
+    WorkItem,
+    WorkItemLink,
+    WorkItemRun,
+    WorkItemStateEvent,
+)
 from symphony_dbcli.review_actions import issue_link_marker
 from symphony_dbcli.sources import SourceSyncClient
 from symphony_dbcli.store import Store
@@ -241,6 +248,67 @@ def test_fastapi_sync_attaches_newly_linked_pr_to_active_issue_work_item(tmp_pat
     assert {link.relationship for link in work_item_links} == {"primary_issue", "linked_pr", "active_pr"}
 
 
+def test_fastapi_source_item_ignore_hides_backlog_card(tmp_path: Path) -> None:
+    client = _client(tmp_path, source_sync_client=FakeSourceSyncClient())
+    source_id = _add_source(client, "dbcli/litecli")
+    _sync_source(client, source_id)
+    source_item_id = _source_item_id_for(client, source_id, "Fix completion crash")
+
+    response = client.post(
+        f"/source-items/{source_item_id}/ignore",
+        data={"note": "Not relevant right now."},
+        follow_redirects=False,
+    )
+    board = client.get(f"/board?source_id={source_id}")
+    source_item = _source_item(tmp_path, source_item_id)
+
+    assert response.status_code == 303
+    assert "Fix completion crash" not in board.text
+    assert source_item.disposition == "ignored"
+    assert source_item.disposition_note == "Not relevant right now."
+
+
+def test_fastapi_archive_work_item_hides_card(tmp_path: Path) -> None:
+    client = _client(tmp_path, source_sync_client=FakeSourceSyncClient())
+    source_id = _add_source(client, "dbcli/litecli")
+    _sync_source(client, source_id)
+    source_item_id = _source_item_id_for(client, source_id, "Fix completion crash")
+    _activate_source_item(client, source_item_id, task_type="code")
+
+    response = client.post(
+        "/work-items/1/archive",
+        data={"note": "Handled elsewhere."},
+        follow_redirects=False,
+    )
+    board = client.get(f"/board?source_id={source_id}")
+    work_item = _work_item(tmp_path, 1)
+
+    assert response.status_code == 303
+    assert "work item #1" not in board.text
+    assert work_item.state == "done"
+    assert work_item.disposition == "archived"
+    assert work_item.outcome == "archived_by_user"
+
+
+def test_fastapi_sync_marks_work_item_done_when_issue_closes(tmp_path: Path) -> None:
+    sync_client = ClosableIssueSyncClient()
+    client = _client(tmp_path, source_sync_client=sync_client)
+    source_id = _add_source(client, "dbcli/litecli")
+    _sync_source(client, source_id)
+    source_item_id = _source_item_id_for(client, source_id, "Closable issue")
+    _activate_source_item(client, source_item_id, task_type="code")
+
+    sync_client.open_issue = False
+    _sync_source(client, source_id)
+    board = client.get(f"/board?source_id={source_id}")
+    work_item = _work_item(tmp_path, 1)
+
+    assert "Done" in board.text
+    assert "work item #1" in board.text
+    assert work_item.state == "done"
+    assert work_item.outcome == "issue_closed_external"
+
+
 def test_fastapi_source_filters_can_be_edited_and_applied_to_sync(tmp_path: Path) -> None:
     sync_client = FilteredSourceSyncClient()
     client = _client(tmp_path, source_sync_client=sync_client)
@@ -392,6 +460,18 @@ def _linked_pr_records(tmp_path: Path) -> tuple[list[SourceItemLink], WorkItem, 
     return source_links, work_item, work_item_links
 
 
+def _source_item(tmp_path: Path, source_item_id: int) -> SourceItem:
+    session_factory = create_session_factory(create_db_engine(str(tmp_path / "symphony.db")))
+    with session_factory() as session:
+        return session.scalars(select(SourceItem).where(SourceItem.id == source_item_id)).one()
+
+
+def _work_item(tmp_path: Path, work_item_id: int) -> WorkItem:
+    session_factory = create_session_factory(create_db_engine(str(tmp_path / "symphony.db")))
+    with session_factory() as session:
+        return session.scalars(select(WorkItem).where(WorkItem.id == work_item_id)).one()
+
+
 class FakeSourceSyncClient:
     def list_issues(self, repo: str, labels: list[str] | None = None) -> list[GitHubIssue]:
         return [
@@ -529,3 +609,28 @@ class LinkedPullRequestSyncClient:
                 body="regular body",
             ),
         ]
+
+
+class ClosableIssueSyncClient:
+    def __init__(self) -> None:
+        self.open_issue = True
+
+    def list_issues(self, repo: str, labels: list[str] | None = None) -> list[GitHubIssue]:
+        if not self.open_issue:
+            return []
+        return [
+            GitHubIssue(
+                repo=repo,
+                number=245,
+                title="Closable issue",
+                body="issue body",
+                url=f"https://github.com/{repo}/issues/245",
+                state="open",
+                labels=["bug"],
+                author="alice",
+                updated_at="2026-05-25T01:00:00Z",
+            )
+        ]
+
+    def list_pull_requests(self, repo: str, *, state: str = "open") -> list[PullRequest]:
+        return []
