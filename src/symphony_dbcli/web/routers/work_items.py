@@ -75,6 +75,28 @@ def move(
     )
 
 
+@router.post("/work-items/{work_item_id}/active-pr")
+def select_active_pr(
+    request: Request,
+    work_item_id: int,
+    source_item_id: Annotated[int, Form()],
+) -> Response:
+    try:
+        work_item_repository(request).select_active_pr(work_item_id, source_item_id)
+    except WorkItemError as exc:
+        context = _detail_context(request, work_item_id, error=str(exc))
+        return templates.TemplateResponse(
+            request=request,
+            name="work_items/detail.html",
+            context=context,
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    return RedirectResponse(
+        f"/work-items/{work_item_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/source-items/{source_item_id}/activate")
 def activate_form(request: Request, source_item_id: int) -> Response:
     source_item = source_repository(request).get_source_item(source_item_id)
@@ -134,6 +156,9 @@ def _detail_context(request: Request, work_item_id: int, error: str) -> dict[str
         raise HTTPException(status_code=404, detail="Work item not found")
     context = page_context(request, title=f"Work Item #{work_item_id}", active="work_items")
     context["work_item"] = work_item
+    linked_source_items = work_item_repository(request).linked_source_items(work_item_id)
+    context["linked_source_items"] = linked_source_items
+    context["linked_pull_requests"] = [item for item in linked_source_items if item.kind == "pull_request"]
     context["states"] = [(state, STATE_LABELS[state]) for state in KANBAN_STATES]
     context["review_reasons"] = REVIEW_RERUN_REASONS.items()
     context["error"] = error

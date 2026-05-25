@@ -825,7 +825,7 @@ Likely new primitives:
 - [x] Build kanban board UI backed by `work_items`.
 - [x] Implement backlog-to-todo activation modal with task type and optional
   user hint.
-- [ ] Default issue-with-linked-PR and PR cards to review/fix mode.
+- [x] Default issue-with-linked-PR and PR cards to review/fix mode.
 - [x] Implement in-review-to-in-progress reason selector with multi-select
   reasons.
 - [ ] Pivot orchestrator runtime identity from issue/attempt to work item.
@@ -837,8 +837,8 @@ Likely new primitives:
 - [ ] Add operations task primitive and dashboard view for operation summaries.
 - [ ] Update PR creation to strongly link work item, issue, and PR in SQLite
   and PR body marker.
-- [ ] Group linked issue/PR cards in the board and add expandable detail view.
-- [ ] Support multiple linked PRs with one active PR selector.
+- [x] Group linked issue/PR cards in the board and add expandable detail view.
+- [x] Support multiple linked PRs with one active PR selector.
 - [ ] Auto-mark work items done when linked PRs merge or linked issues close
   externally, recording outcome.
 - [ ] Add opt-in archive/ignore support for source items and work items.
@@ -846,8 +846,8 @@ Likely new primitives:
   questions.
 - [x] Build fast local tests for source sync, backlog-to-todo activation, and
   kanban state transitions.
-- [ ] Build fast local tests for grouped cards and work item workflow
-  execution.
+- [x] Build fast local tests for grouped cards and active PR selection.
+- [ ] Build fast local tests for work item workflow execution.
 - [x] Add GitHub-backed e2e smoke scenario for source sync through kanban
   activation.
 - [ ] Extend the GitHub-backed e2e scenario through PR review/fix workflow.

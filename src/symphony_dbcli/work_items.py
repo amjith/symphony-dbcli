@@ -4,10 +4,11 @@ import json
 from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from .clock import utc_now
 from .db import SessionFactory
-from .models import SourceItem, WorkItem, WorkItemLink, WorkItemRun, WorkItemStateEvent
+from .models import SourceItem, SourceItemLink, WorkItem, WorkItemLink, WorkItemRun, WorkItemStateEvent
 
 KANBAN_STATES = ("todo", "in_progress", "in_review", "done")
 TASK_TYPES = frozenset({"research", "code", "operations"})
@@ -53,6 +54,7 @@ class WorkItemView:
     source_kind: str
     source_number: int
     source_url: str
+    active_pr_source_item_id: int | None
     title: str
     state: str
     task_type: str
@@ -67,6 +69,20 @@ class WorkItemView:
     @property
     def state_label(self) -> str:
         return STATE_LABELS[self.state]
+
+
+@dataclass(frozen=True)
+class WorkItemLinkedSourceView:
+    id: int
+    kind: str
+    number: int
+    title: str
+    url: str
+    relationship: str
+
+    @property
+    def source_label(self) -> str:
+        return "PR" if self.kind == "pull_request" else "Issue"
 
 
 class WorkItemRepository:
@@ -93,9 +109,12 @@ class WorkItemRepository:
             if existing:
                 return _work_item_view(existing, source_item)
 
+            linked_prs = _linked_prs_for_source_item(session, source_item)
+            active_pr_source_item_id = _active_pr_source_item_id(source_item, linked_prs)
             work_item = WorkItem(
                 source_id=source_item.source_id,
                 primary_source_item_id=source_item.id,
+                active_pr_source_item_id=active_pr_source_item_id,
                 title=source_item.title,
                 state="todo",
                 task_type=task_type,
@@ -106,14 +125,34 @@ class WorkItemRepository:
             )
             session.add(work_item)
             session.flush()
-            session.add(
-                WorkItemLink(
-                    work_item_id=work_item.id,
-                    source_item_id=source_item.id,
-                    relationship="primary",
-                    created_at=now,
-                )
+            session.add_all(
+                [
+                    WorkItemLink(
+                        work_item_id=work_item.id,
+                        source_item_id=source_item.id,
+                        relationship=_primary_relationship(source_item),
+                        created_at=now,
+                    ),
+                    *[
+                        WorkItemLink(
+                            work_item_id=work_item.id,
+                            source_item_id=linked_pr.id,
+                            relationship="linked_pr",
+                            created_at=now,
+                        )
+                        for linked_pr in linked_prs
+                    ],
+                ]
             )
+            if active_pr_source_item_id and source_item.kind != "pull_request":
+                session.add(
+                    WorkItemLink(
+                        work_item_id=work_item.id,
+                        source_item_id=active_pr_source_item_id,
+                        relationship="active_pr",
+                        created_at=now,
+                    )
+                )
             session.add(
                 WorkItemStateEvent(
                     work_item_id=work_item.id,
@@ -172,6 +211,59 @@ class WorkItemRepository:
                 return None
             work_item, source_item = row
             return _work_item_view(work_item, source_item)
+
+    def linked_source_items(self, work_item_id: int) -> list[WorkItemLinkedSourceView]:
+        with self._session_factory() as session:
+            rows = session.execute(
+                select(SourceItem, WorkItemLink.relationship)
+                .join(WorkItemLink, WorkItemLink.source_item_id == SourceItem.id)
+                .where(WorkItemLink.work_item_id == work_item_id)
+                .order_by(SourceItem.kind.asc(), SourceItem.number.asc(), WorkItemLink.relationship.asc())
+            ).all()
+            grouped: dict[int, tuple[SourceItem, set[str]]] = {}
+            for source_item, relationship in rows:
+                _, relationships = grouped.setdefault(source_item.id, (source_item, set()))
+                relationships.add(relationship)
+            return [
+                WorkItemLinkedSourceView(
+                    id=source_item.id,
+                    kind=source_item.kind,
+                    number=source_item.number,
+                    title=source_item.title,
+                    url=source_item.url,
+                    relationship=", ".join(sorted(relationships)),
+                )
+                for source_item, relationships in grouped.values()
+            ]
+
+    def select_active_pr(self, work_item_id: int, source_item_id: int) -> WorkItemView:
+        now = utc_now()
+        with self._session_factory() as session:
+            row = session.execute(
+                select(WorkItem, SourceItem)
+                .join(SourceItem, WorkItem.primary_source_item_id == SourceItem.id)
+                .where(WorkItem.id == work_item_id)
+            ).one_or_none()
+            if row is None:
+                raise WorkItemError("Work item not found.")
+            work_item, primary_source_item = row
+            linked_pr = session.execute(
+                select(SourceItem)
+                .join(WorkItemLink, WorkItemLink.source_item_id == SourceItem.id)
+                .where(
+                    WorkItemLink.work_item_id == work_item_id,
+                    SourceItem.id == source_item_id,
+                    SourceItem.kind == "pull_request",
+                )
+            ).scalar_one_or_none()
+            if linked_pr is None:
+                raise WorkItemError("Active PR must be linked to this work item.")
+            work_item.active_pr_source_item_id = linked_pr.id
+            work_item.updated_at = now
+            _ensure_work_item_link(session, work_item_id, linked_pr.id, "active_pr", now)
+            session.commit()
+            session.refresh(work_item)
+            return _work_item_view(work_item, primary_source_item)
 
     def move_work_item(self, move: WorkItemMove) -> WorkItemView:
         target_state = _validated_state(move.target_state)
@@ -250,6 +342,7 @@ def _work_item_view(work_item: WorkItem, source_item: SourceItem) -> WorkItemVie
         source_kind=source_item.kind,
         source_number=source_item.number,
         source_url=source_item.url,
+        active_pr_source_item_id=work_item.active_pr_source_item_id,
         title=work_item.title,
         state=work_item.state,
         task_type=work_item.task_type,
@@ -261,3 +354,56 @@ def _work_item_view(work_item: WorkItem, source_item: SourceItem) -> WorkItemVie
 
 def reasons_json(reasons: list[str]) -> str:
     return json.dumps(reasons, sort_keys=True)
+
+
+def _linked_prs_for_source_item(session: Session, source_item: SourceItem) -> list[SourceItem]:
+    if source_item.kind == "pull_request":
+        return []
+    return list(
+        session.scalars(
+            select(SourceItem)
+            .join(SourceItemLink, SourceItemLink.linked_source_item_id == SourceItem.id)
+            .where(
+                SourceItemLink.source_item_id == source_item.id,
+                SourceItemLink.relationship == "issue_pr",
+                SourceItem.kind == "pull_request",
+                SourceItem.state == "open",
+            )
+            .order_by(SourceItem.number.asc())
+        )
+    )
+
+
+def _active_pr_source_item_id(source_item: SourceItem, linked_prs: list[SourceItem]) -> int | None:
+    if source_item.kind == "pull_request":
+        return source_item.id
+    return linked_prs[0].id if linked_prs else None
+
+
+def _primary_relationship(source_item: SourceItem) -> str:
+    return "source_pr" if source_item.kind == "pull_request" else "primary_issue"
+
+
+def _ensure_work_item_link(
+    session: Session,
+    work_item_id: int,
+    source_item_id: int,
+    relationship: str,
+    now: str,
+) -> None:
+    existing = session.scalar(
+        select(WorkItemLink).where(
+            WorkItemLink.work_item_id == work_item_id,
+            WorkItemLink.source_item_id == source_item_id,
+            WorkItemLink.relationship == relationship,
+        )
+    )
+    if existing is None:
+        session.add(
+            WorkItemLink(
+                work_item_id=work_item_id,
+                source_item_id=source_item_id,
+                relationship=relationship,
+                created_at=now,
+            )
+        )

@@ -8,6 +8,17 @@
     <span class="source-card-kind">{{ source_item.kind_label }}</span>
     <a href="{{ source_item.url }}" target="_blank" rel="noreferrer">#{{ source_item.number }}</a>
     <strong>{{ source_item.title }}</strong>
+    <span class="muted">{{ source_item.activation_label }}</span>
+    {% if source_item.linked_items %}
+    <details class="linked-detail" open>
+      <summary>{{ source_item.linked_items|length }} linked PR{{ "s" if source_item.linked_items|length != 1 else "" }}</summary>
+      <ul>
+        {% for linked in source_item.linked_items %}
+        <li><a href="{{ linked.url }}" target="_blank" rel="noreferrer">#{{ linked.number }}</a> {{ linked.title }}</li>
+        {% endfor %}
+      </ul>
+    </details>
+    {% endif %}
   </div>
   <form class="stacked-form" method="post" action="/source-items/{{ source_item.id }}/activate">
     <label for="task-type">Task Type</label>

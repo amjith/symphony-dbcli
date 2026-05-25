@@ -10,7 +10,8 @@ from sqlalchemy import select
 from symphony_dbcli.config import DatabaseConfig, default_config
 from symphony_dbcli.db import create_db_engine, create_session_factory
 from symphony_dbcli.github import GitHubIssue, PullRequest
-from symphony_dbcli.models import WorkItemRun, WorkItemStateEvent
+from symphony_dbcli.models import SourceItemLink, WorkItem, WorkItemLink, WorkItemRun, WorkItemStateEvent
+from symphony_dbcli.review_actions import issue_link_marker
 from symphony_dbcli.sources import SourceSyncClient
 from symphony_dbcli.store import Store
 from symphony_dbcli.web.app import create_app
@@ -198,6 +199,48 @@ def test_fastapi_work_item_move_records_review_rerun_reasons(tmp_path: Path) -> 
     assert json.loads(runs[-1].reasons_json) == ["address_pr_comments", "fix_ci"]
 
 
+def test_fastapi_groups_linked_issue_pr_and_selects_active_pr(tmp_path: Path) -> None:
+    client = _client(tmp_path, source_sync_client=LinkedPullRequestSyncClient())
+    source_id = _add_source(client, "dbcli/litecli")
+    _sync_source(client, source_id)
+    source_item_id = _source_item_id_for(client, source_id, "Linked issue")
+
+    board = client.get(f"/board?source_id={source_id}")
+    form = client.get(f"/source-items/{source_item_id}/activate")
+    _activate_source_item(client, source_item_id, task_type="code")
+    detail = client.get("/work-items/1")
+    source_links, work_item, work_item_links = _linked_pr_records(tmp_path)
+
+    assert "1 linked PR" in board.text
+    assert "Linked PR" in board.text
+    assert "Review/fix" in board.text
+    assert "Unlinked PR" in board.text
+    assert '<option value="code" selected>Code</option>' in form.text
+    assert "1 linked PR" in form.text
+    assert "Active PR" in detail.text
+    assert "PR #12" in detail.text
+    assert work_item.active_pr_source_item_id == source_links[0].linked_source_item_id
+    assert {link.relationship for link in work_item_links} == {"primary_issue", "linked_pr", "active_pr"}
+
+
+def test_fastapi_sync_attaches_newly_linked_pr_to_active_issue_work_item(tmp_path: Path) -> None:
+    sync_client = LinkedPullRequestSyncClient(linked=False)
+    client = _client(tmp_path, source_sync_client=sync_client)
+    source_id = _add_source(client, "dbcli/litecli")
+    _sync_source(client, source_id)
+    source_item_id = _source_item_id_for(client, source_id, "Linked issue")
+    _activate_source_item(client, source_item_id, task_type="code")
+
+    sync_client.linked = True
+    _sync_source(client, source_id)
+    detail = client.get("/work-items/1")
+    source_links, work_item, work_item_links = _linked_pr_records(tmp_path)
+
+    assert "Active PR" in detail.text
+    assert work_item.active_pr_source_item_id == source_links[0].linked_source_item_id
+    assert {link.relationship for link in work_item_links} == {"primary_issue", "linked_pr", "active_pr"}
+
+
 def test_fastapi_source_filters_can_be_edited_and_applied_to_sync(tmp_path: Path) -> None:
     sync_client = FilteredSourceSyncClient()
     client = _client(tmp_path, source_sync_client=sync_client)
@@ -340,6 +383,15 @@ def _work_item_events_and_runs(tmp_path: Path) -> tuple[list[WorkItemStateEvent]
     return events, runs
 
 
+def _linked_pr_records(tmp_path: Path) -> tuple[list[SourceItemLink], WorkItem, list[WorkItemLink]]:
+    session_factory = create_session_factory(create_db_engine(str(tmp_path / "symphony.db")))
+    with session_factory() as session:
+        source_links = list(session.scalars(select(SourceItemLink).order_by(SourceItemLink.id.asc())))
+        work_item = session.scalars(select(WorkItem)).one()
+        work_item_links = list(session.scalars(select(WorkItemLink).order_by(WorkItemLink.id.asc())))
+    return source_links, work_item, work_item_links
+
+
 class FakeSourceSyncClient:
     def list_issues(self, repo: str, labels: list[str] | None = None) -> list[GitHubIssue]:
         return [
@@ -418,7 +470,7 @@ class FilteredSourceSyncClient:
                 number=8,
                 url=f"https://github.com/{repo}/pull/8",
                 title="Matching PR",
-                state=state,
+                state="open",
                 author="alice",
                 labels=["bug", "support"],
                 updated_at="2026-05-25T02:00:00Z",
@@ -433,5 +485,47 @@ class FilteredSourceSyncClient:
                 labels=["support"],
                 updated_at="2026-05-25T02:00:00Z",
                 body="pr body",
+            ),
+        ]
+
+
+class LinkedPullRequestSyncClient:
+    def __init__(self, *, linked: bool = True) -> None:
+        self.linked = linked
+
+    def list_issues(self, repo: str, labels: list[str] | None = None) -> list[GitHubIssue]:
+        return [
+            GitHubIssue(
+                repo=repo,
+                number=245,
+                title="Linked issue",
+                body="issue body",
+                url=f"https://github.com/{repo}/issues/245",
+                state="open",
+                labels=["bug"],
+                author="alice",
+                updated_at="2026-05-25T01:00:00Z",
+            )
+        ]
+
+    def list_pull_requests(self, repo: str, *, state: str = "open") -> list[PullRequest]:
+        return [
+            PullRequest(
+                number=12,
+                url=f"https://github.com/{repo}/pull/12",
+                title="Linked PR",
+                state=state,
+                author="alice",
+                updated_at="2026-05-25T02:00:00Z",
+                body=issue_link_marker(repo, 245) if self.linked else "regular body",
+            ),
+            PullRequest(
+                number=13,
+                url=f"https://github.com/{repo}/pull/13",
+                title="Unlinked PR",
+                state=state,
+                author="bob",
+                updated_at="2026-05-25T02:00:00Z",
+                body="regular body",
             ),
         ]

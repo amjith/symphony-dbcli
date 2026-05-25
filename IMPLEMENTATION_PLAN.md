@@ -604,7 +604,7 @@ Implementation checklist:
 - [x] Populate todo, in progress, in review, and done from work-item state.
 - [x] Implement backlog-to-todo activation with task type and optional user
   hint.
-- [ ] Default issue-with-linked-PR and PR cards to review/fix mode.
+- [x] Default issue-with-linked-PR and PR cards to review/fix mode.
 - [x] Implement in-review-to-in-progress reason selection with multi-select
   reasons.
 - [ ] Pivot orchestrator runtime identity to `work_item_id`.
@@ -615,7 +615,7 @@ Implementation checklist:
 - [ ] Add `codex.operations_task` and operation-summary dashboard views.
 - [ ] Update PR creation to link work item, issue, and PR in SQLite and in the
   PR body marker.
-- [ ] Add grouped issue/PR cards with an expandable detail view and active PR
+- [x] Add grouped issue/PR cards with an expandable detail view and active PR
   selector.
 - [ ] Auto-mark work items done on external PR merge or issue close with
   explicit outcome.
@@ -623,7 +623,8 @@ Implementation checklist:
 - [ ] Update Ask Symphony for source, work item, and kanban-state questions.
 - [x] Add fast local tests for source sync, backlog-to-todo activation, and
   kanban state transitions.
-- [ ] Add fast local tests for grouping and work item workflow execution.
+- [x] Add fast local tests for grouped cards and active PR selection.
+- [ ] Add fast local tests for work item workflow execution.
 - [x] Add a GitHub-backed e2e smoke scenario for source sync through kanban
   activation.
 - [ ] Extend the GitHub-backed e2e scenario through PR review/fix workflow.
@@ -660,6 +661,9 @@ Progress notes:
   endpoints, durable state events for manual kanban transitions, and queued
   rerun records when in-review items move back to in-progress with selected
   reasons.
+- 2026-05-25: Added source-item issue/PR links, active PR selection on work
+  items, grouped backlog cards for linked issues and PRs, and sync-time
+  attachment of newly linked PRs to existing active issue work items.
 
 ## Durable Cross-Project Spec
 

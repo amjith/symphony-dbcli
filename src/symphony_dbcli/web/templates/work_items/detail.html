@@ -18,6 +18,39 @@
       <dt>Source</dt>
       <dd><a href="{{ work_item.source_url }}" target="_blank" rel="noreferrer">{{ work_item.source_label }} #{{ work_item.source_number }}</a></dd>
     </div>
+    {% if linked_source_items %}
+    <div>
+      <dt>Linked Items</dt>
+      <dd>
+        <ul class="compact-list">
+          {% for linked in linked_source_items %}
+          <li>
+            <a href="{{ linked.url }}" target="_blank" rel="noreferrer">{{ linked.source_label }} #{{ linked.number }}</a>
+            <span>{{ linked.title }}</span>
+            <span class="muted">{{ linked.relationship }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </dd>
+    </div>
+    {% endif %}
+    {% if linked_pull_requests %}
+    <div>
+      <dt>Active PR</dt>
+      <dd>
+        <form class="inline-form" method="post" action="/work-items/{{ work_item.id }}/active-pr">
+          <select name="source_item_id" aria-label="Active PR">
+            {% for pull_request in linked_pull_requests %}
+            <option value="{{ pull_request.id }}" {{ "selected" if pull_request.id == work_item.active_pr_source_item_id else "" }}>
+              #{{ pull_request.number }} {{ pull_request.title }}
+            </option>
+            {% endfor %}
+          </select>
+          <button type="submit">Set Active</button>
+        </form>
+      </dd>
+    </div>
+    {% endif %}
     <div>
       <dt>Hint</dt>
       <dd>{{ work_item.user_hint or "-" }}</dd>

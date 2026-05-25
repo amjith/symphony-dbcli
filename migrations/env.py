@@ -10,6 +10,7 @@ from symphony_dbcli.db import Base
 from symphony_dbcli.models import (
     Source,
     SourceItem,
+    SourceItemLink,
     SourceSyncRun,
     WorkItem,
     WorkItemLink,
@@ -21,6 +22,7 @@ config = context.config
 REGISTERED_MODELS = (
     Source,
     SourceItem,
+    SourceItemLink,
     SourceSyncRun,
     WorkItem,
     WorkItemLink,

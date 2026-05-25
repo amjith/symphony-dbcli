@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, cast
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from .clock import utc_now
 from .db import SessionFactory
 from .github import GitHubIssue, PullRequest
-from .models import Source, SourceItem, SourceSyncRun, WorkItem, WorkItemLink
+from .models import Source, SourceItem, SourceItemLink, SourceSyncRun, WorkItem, WorkItemLink
+from .review_actions import body_links_issue, issue_link_marker
 
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
@@ -115,6 +117,7 @@ class SourceItemView:
     labels: list[str]
     github_updated_at: str
     synced_at: str
+    linked_items: tuple[SourceItemView, ...] = ()
 
     @classmethod
     def from_model(cls, item: SourceItem) -> SourceItemView:
@@ -138,7 +141,15 @@ class SourceItemView:
 
     @property
     def default_task_type(self) -> str:
-        return "code" if self.kind == "pull_request" else "research"
+        return "code" if self.kind == "pull_request" or self.linked_items else "research"
+
+    @property
+    def activation_label(self) -> str:
+        return "Review/fix" if self.default_task_type == "code" else "Research"
+
+    @property
+    def has_linked_items(self) -> bool:
+        return bool(self.linked_items)
 
 
 @dataclass(frozen=True)
@@ -268,21 +279,44 @@ class SourceRepository:
             .where(WorkItem.state != "done")
         )
         with self._session_factory() as session:
-            rows = session.scalars(
-                select(SourceItem)
-                .where(
-                    SourceItem.source_id == source_id,
-                    SourceItem.state == "open",
-                    ~SourceItem.id.in_(linked_active_source_items),
+            rows = list(
+                session.scalars(
+                    select(SourceItem)
+                    .where(
+                        SourceItem.source_id == source_id,
+                        SourceItem.state == "open",
+                        ~SourceItem.id.in_(linked_active_source_items),
+                    )
+                    .order_by(SourceItem.kind.asc(), SourceItem.number.desc())
                 )
-                .order_by(SourceItem.kind.asc(), SourceItem.number.desc())
-            ).all()
-            return [SourceItemView.from_model(row) for row in rows]
+            )
+            linked_prs_by_issue_id = _linked_prs_by_issue_id(session, source_id, rows)
+            linked_pr_ids = {item.id for linked in linked_prs_by_issue_id.values() for item in linked}
+            return [
+                _source_item_view_with_links(row, linked_prs_by_issue_id.get(row.id, []))
+                for row in rows
+                if row.id not in linked_pr_ids
+            ]
+
+    def linked_source_items(self, source_item_id: int) -> list[SourceItemView]:
+        with self._session_factory() as session:
+            links = session.execute(
+                select(SourceItem)
+                .join(SourceItemLink, SourceItemLink.linked_source_item_id == SourceItem.id)
+                .where(SourceItemLink.source_item_id == source_item_id)
+                .order_by(SourceItem.number.asc())
+            ).scalars()
+            return [SourceItemView.from_model(item) for item in links]
 
     def get_source_item(self, source_item_id: int) -> SourceItemView | None:
         with self._session_factory() as session:
             source_item = session.get(SourceItem, source_item_id)
-            return SourceItemView.from_model(source_item) if source_item else None
+            if source_item is None:
+                return None
+            return _source_item_view_with_links(
+                source_item,
+                _linked_prs_for_issue(session, source_item),
+            )
 
     def start_sync_run(self, source_id: int) -> int:
         now = utc_now()
@@ -387,6 +421,7 @@ class SourceRepository:
                             updated_at=now,
                         )
                     )
+            session.flush()
             for kind, active_numbers in active_by_kind.items():
                 stale_items = session.scalars(
                     select(SourceItem).where(SourceItem.source_id == source_id, SourceItem.kind == kind)
@@ -395,6 +430,7 @@ class SourceRepository:
                     if stale_item.number not in active_numbers:
                         stale_item.state = "closed"
                         stale_item.updated_at = now
+            _record_issue_pr_links(session, source_id, now)
             session.commit()
 
 
@@ -505,6 +541,177 @@ def _active_numbers_by_kind(items: list[SourceItemUpsert]) -> dict[str, set[int]
     for item in items:
         numbers.setdefault(item.kind, set()).add(item.number)
     return numbers
+
+
+def _source_item_view_with_links(item: SourceItem, linked_items: list[SourceItem]) -> SourceItemView:
+    return replace(
+        SourceItemView.from_model(item),
+        linked_items=tuple(SourceItemView.from_model(linked_item) for linked_item in linked_items),
+    )
+
+
+def _linked_prs_by_issue_id(
+    session: Session,
+    source_id: int,
+    source_items: list[SourceItem],
+) -> dict[int, list[SourceItem]]:
+    issue_ids = {item.id for item in source_items if item.kind == "issue"}
+    available_ids = {item.id for item in source_items}
+    if not issue_ids:
+        return {}
+    rows = session.execute(
+        select(SourceItemLink.source_item_id, SourceItem)
+        .join(SourceItem, SourceItemLink.linked_source_item_id == SourceItem.id)
+        .where(
+            SourceItemLink.source_id == source_id,
+            SourceItemLink.relationship == "issue_pr",
+            SourceItemLink.source_item_id.in_(issue_ids),
+            SourceItemLink.linked_source_item_id.in_(available_ids),
+            SourceItem.state == "open",
+        )
+        .order_by(SourceItem.number.asc())
+    ).all()
+    grouped: dict[int, list[SourceItem]] = {}
+    for issue_id, linked_item in rows:
+        grouped.setdefault(issue_id, []).append(linked_item)
+    return grouped
+
+
+def _linked_prs_for_issue(session: Session, source_item: SourceItem) -> list[SourceItem]:
+    if source_item.kind != "issue":
+        return []
+    return list(
+        session.scalars(
+            select(SourceItem)
+            .join(SourceItemLink, SourceItemLink.linked_source_item_id == SourceItem.id)
+            .where(
+                SourceItemLink.source_item_id == source_item.id,
+                SourceItemLink.relationship == "issue_pr",
+                SourceItem.kind == "pull_request",
+                SourceItem.state == "open",
+            )
+            .order_by(SourceItem.number.asc())
+        )
+    )
+
+
+def _record_issue_pr_links(session: Session, source_id: int, now: str) -> None:
+    source = session.get(Source, source_id)
+    if source is None:
+        return
+    issues = list(
+        session.scalars(
+            select(SourceItem).where(
+                SourceItem.source_id == source_id,
+                SourceItem.kind == "issue",
+                SourceItem.state == "open",
+            )
+        )
+    )
+    pull_requests = list(
+        session.scalars(
+            select(SourceItem).where(
+                SourceItem.source_id == source_id,
+                SourceItem.kind == "pull_request",
+                SourceItem.state == "open",
+            )
+        )
+    )
+    existing_links = list(
+        session.scalars(
+            select(SourceItemLink).where(
+                SourceItemLink.source_id == source_id,
+                SourceItemLink.relationship == "issue_pr",
+            )
+        )
+    )
+    existing_by_pair = {(link.source_item_id, link.linked_source_item_id): link for link in existing_links}
+    verified_pairs: set[tuple[int, int]] = set()
+    for issue in issues:
+        marker = issue_link_marker(source.repo, issue.number)
+        for pull_request in pull_requests:
+            if not body_links_issue(pull_request.body, source.repo, issue.number):
+                continue
+            pair = (issue.id, pull_request.id)
+            verified_pairs.add(pair)
+            existing = existing_by_pair.get(pair)
+            if existing:
+                existing.link_source = "description_marker"
+                existing.marker = marker
+                existing.verified_at = now
+            else:
+                session.add(
+                    SourceItemLink(
+                        source_id=source_id,
+                        source_item_id=issue.id,
+                        linked_source_item_id=pull_request.id,
+                        relationship="issue_pr",
+                        link_source="description_marker",
+                        marker=marker,
+                        verified_at=now,
+                    )
+                )
+    for pair, link in existing_by_pair.items():
+        if link.link_source == "description_marker" and pair not in verified_pairs:
+            session.delete(link)
+    session.flush()
+    _attach_linked_prs_to_active_work_items(session, source_id, now)
+
+
+def _attach_linked_prs_to_active_work_items(session: Session, source_id: int, now: str) -> None:
+    rows = session.execute(
+        select(WorkItem, SourceItemLink)
+        .join(SourceItemLink, SourceItemLink.source_item_id == WorkItem.primary_source_item_id)
+        .where(
+            WorkItem.source_id == source_id,
+            WorkItem.state != "done",
+            SourceItemLink.relationship == "issue_pr",
+        )
+    ).all()
+    for work_item, source_item_link in rows:
+        _ensure_work_item_link(
+            session,
+            work_item_id=work_item.id,
+            source_item_id=source_item_link.linked_source_item_id,
+            relationship="linked_pr",
+            now=now,
+        )
+        if work_item.active_pr_source_item_id is None:
+            work_item.active_pr_source_item_id = source_item_link.linked_source_item_id
+            work_item.updated_at = now
+            _ensure_work_item_link(
+                session,
+                work_item_id=work_item.id,
+                source_item_id=source_item_link.linked_source_item_id,
+                relationship="active_pr",
+                now=now,
+            )
+
+
+def _ensure_work_item_link(
+    session: Session,
+    *,
+    work_item_id: int,
+    source_item_id: int,
+    relationship: str,
+    now: str,
+) -> None:
+    existing = session.scalar(
+        select(WorkItemLink).where(
+            WorkItemLink.work_item_id == work_item_id,
+            WorkItemLink.source_item_id == source_item_id,
+            WorkItemLink.relationship == relationship,
+        )
+    )
+    if existing is None:
+        session.add(
+            WorkItemLink(
+                work_item_id=work_item_id,
+                source_item_id=source_item_id,
+                relationship=relationship,
+                created_at=now,
+            )
+        )
 
 
 def _filtered_items(items: list[SourceItemUpsert], filters: SourceFilters) -> list[SourceItemUpsert]:

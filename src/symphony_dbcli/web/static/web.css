@@ -318,6 +318,28 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.linked-detail {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.linked-detail summary {
+  cursor: pointer;
+  font-weight: 750;
+}
+
+.linked-detail ul,
+.compact-list {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.compact-list {
+  margin: 0;
+}
+
 .source-card-kind {
   display: inline-flex;
   align-items: center;

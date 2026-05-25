@@ -53,6 +53,17 @@
         </div>
         <strong>{{ item.title }}</strong>
         <span class="muted">{{ item.author or "unknown author" }}</span>
+        <span class="muted">{{ item.activation_label }}</span>
+        {% if item.linked_items %}
+        <details class="linked-detail">
+          <summary>{{ item.linked_items|length }} linked PR{{ "s" if item.linked_items|length != 1 else "" }}</summary>
+          <ul>
+            {% for linked in item.linked_items %}
+            <li><a href="{{ linked.url }}" target="_blank" rel="noreferrer">#{{ linked.number }}</a> {{ linked.title }}</li>
+            {% endfor %}
+          </ul>
+        </details>
+        {% endif %}
         <a class="text-action" href="/source-items/{{ item.id }}/activate">Queue</a>
       </article>
       {% endfor %}

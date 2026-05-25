@@ -68,6 +68,35 @@ class SourceItem(Base):
     source: Mapped[Source] = relationship(back_populates="items")
 
 
+class SourceItemLink(Base):
+    __tablename__ = "source_item_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_item_id",
+            "linked_source_item_id",
+            "relationship",
+            name="uq_source_item_links_identity",
+        ),
+        Index("ix_source_item_links_source", "source_id"),
+        Index("ix_source_item_links_linked", "linked_source_item_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), nullable=False)
+    source_item_id: Mapped[int] = mapped_column(
+        ForeignKey("source_items.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    linked_source_item_id: Mapped[int] = mapped_column(
+        ForeignKey("source_items.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    relationship: Mapped[str] = mapped_column(String(32), nullable=False)
+    link_source: Mapped[str] = mapped_column(String(64), nullable=False)
+    marker: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    verified_at: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
 class WorkItem(Base):
     __tablename__ = "work_items"
 
@@ -77,6 +106,7 @@ class WorkItem(Base):
         ForeignKey("source_items.id", ondelete="CASCADE"),
         nullable=False,
     )
+    active_pr_source_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     state: Mapped[str] = mapped_column(String(32), nullable=False)
     task_type: Mapped[str] = mapped_column(String(32), nullable=False)
