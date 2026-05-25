@@ -705,14 +705,7 @@ class Store:
             )
 
     def start_queued_work_automatically(self) -> bool:
-        with self.connect() as conn:
-            row = conn.execute(
-                "SELECT value FROM settings WHERE key = ?",
-                (START_QUEUED_WORK_AUTOMATICALLY_KEY,),
-            ).fetchone()
-            if not row:
-                return True
-            return str(row["value"]) == "true"
+        return True
 
     def set_start_queued_work_automatically(self, enabled: bool) -> None:
         with self.connect() as conn:
@@ -722,7 +715,7 @@ class Store:
                 VALUES(?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
                 """,
-                (START_QUEUED_WORK_AUTOMATICALLY_KEY, "true" if enabled else "false", utc_now()),
+                (START_QUEUED_WORK_AUTOMATICALLY_KEY, "true", utc_now()),
             )
 
     def upsert_repo(self, full_name: str) -> None:

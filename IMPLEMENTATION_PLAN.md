@@ -633,6 +633,9 @@ Progress notes:
 - 2026-05-24: Added the first real Sources flow: `/sources/new`, source
   validation, SQLite persistence through SQLAlchemy, an Alembic revision for
   `sources`, and tests that cover adding and listing a repository source.
+- 2026-05-25: Added a dashboard dark-mode toggle and removed the
+  auto-dispatch toggle. Auto-dispatch is now treated as always on, including
+  when an old database setting says otherwise.
 
 ## Durable Cross-Project Spec
 

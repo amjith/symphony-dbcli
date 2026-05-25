@@ -33,11 +33,11 @@ def test_dashboard_uses_static_css(tmp_path: Path) -> None:
     assert "Workspace Strategy" in html
     assert "branch prefix symphony" in html
     assert ".symphony/worktrees" in html
-    assert "Start queued work automatically" in html
+    assert "Workers start automatically when capacity is available." in html
     assert 'action="/workflow/run-cycle" method="post"' in html
     assert "Run Cycle Now" in html
-    assert 'role="switch"' in html
-    assert 'aria-checked="true"' in html
+    assert "Start queued work automatically" not in html
+    assert 'role="switch"' not in html
     assert 'form action="/" method="get" data-ask-form' in html
     assert "data-ask-answer" in html
 
@@ -65,16 +65,15 @@ def test_dashboard_shows_manual_workflow_cycle_result(tmp_path: Path) -> None:
     assert "Workers Started" in html
 
 
-def test_dashboard_shows_worker_auto_start_off(tmp_path: Path) -> None:
+def test_dashboard_auto_dispatch_cannot_be_disabled(tmp_path: Path) -> None:
     store = Store(tmp_path / "symphony.db")
     store.init()
     store.set_start_queued_work_automatically(False)
 
     html = render_index(store)
 
-    assert "Queued work will wait until this is turned on." in html
-    assert 'aria-checked="false"' in html
-    assert 'value="true"' in html
+    assert "Workers start automatically when capacity is available." in html
+    assert "Queued work will wait until this is turned on." not in html
 
 
 def test_dashboard_shows_workflow_reload_status(tmp_path: Path) -> None:
@@ -173,7 +172,7 @@ def test_dashboard_state_updates_runtime_config() -> None:
     state.update_config(live_config)
 
     assert state.runtime(start_queued_work_automatically=False).dry_run is False
-    assert state.runtime(start_queued_work_automatically=False).start_queued_work_automatically is False
+    assert state.runtime(start_queued_work_automatically=False).start_queued_work_automatically is True
 
 
 def test_attempt_page_shows_draft_reply(tmp_path: Path) -> None:

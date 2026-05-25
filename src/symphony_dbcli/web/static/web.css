@@ -12,6 +12,20 @@
   --shadow: 0 1px 2px rgb(16 24 40 / 6%);
 }
 
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #17191d;
+  --surface: #22262c;
+  --surface-subtle: #2c3138;
+  --text: #edf0f3;
+  --muted: #aab3c1;
+  --line: #3b424d;
+  --accent: #47b881;
+  --accent-soft: #18392c;
+  --danger: #f08a82;
+  --shadow: 0 1px 2px rgb(0 0 0 / 22%);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -103,7 +117,7 @@ code {
   flex: 0 0 auto;
   border-radius: 6px;
   padding: 6px 9px;
-  color: #3f4a5a;
+  color: var(--muted);
   font-size: 13px;
   font-weight: 650;
   text-decoration: none;
@@ -129,6 +143,15 @@ code {
   border-radius: 999px;
   padding: 2px 7px;
   background: var(--surface-subtle);
+}
+
+.theme-toggle {
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: var(--text);
+  font-size: 12px;
+  text-transform: none;
 }
 
 .app-shell {

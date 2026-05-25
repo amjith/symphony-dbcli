@@ -18,6 +18,16 @@
     <div class="runtime-strip" aria-label="Runtime">
       <span>{{ runtime.profile }}</span>
       <span>{{ "dry run" if runtime.dry_run else "live" }}</span>
+      <span>auto dispatch</span>
+      <button
+        class="theme-toggle"
+        type="button"
+        data-theme-toggle
+        aria-label="Switch to dark mode"
+        aria-pressed="false"
+      >
+        <span data-theme-toggle-label>Dark</span>
+      </button>
     </div>
   </header>
   <main class="app-shell">
@@ -29,4 +39,3 @@
   </main>
 </body>
 </html>
-

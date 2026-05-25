@@ -149,14 +149,14 @@ def test_failed_attempt_does_not_block_eligible_issue(tmp_path: Path) -> None:
     assert [row["number"] for row in eligible] == [245]
 
 
-def test_start_queued_work_automatically_setting_defaults_on(tmp_path: Path) -> None:
+def test_start_queued_work_automatically_is_always_on(tmp_path: Path) -> None:
     store = Store(tmp_path / "symphony.db")
     store.init()
 
     assert store.start_queued_work_automatically() is True
 
     store.set_start_queued_work_automatically(False)
-    assert store.start_queued_work_automatically() is False
+    assert store.start_queued_work_automatically() is True
 
     store.set_start_queued_work_automatically(True)
     assert store.start_queued_work_automatically() is True

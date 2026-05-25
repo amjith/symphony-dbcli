@@ -38,30 +38,11 @@
 <section class="control-panel">
   <div>
     <h2>Workflow Controls</h2>
-    <span class="muted">
-      {{ "Workers will start when capacity is available." if runtime.start_queued_work_automatically else "Queued work will wait until this is turned on." }}
-    </span>
+    <span class="muted">Workers start automatically when capacity is available.</span>
   </div>
   <div class="control-actions">
     <form action="/workflow/run-cycle" method="post">
       <button type="submit">Run Cycle Now</button>
-    </form>
-    <form action="/settings/start-queued-work-automatically" method="post">
-      <input
-        type="hidden"
-        name="enabled"
-        value="{{ 'false' if runtime.start_queued_work_automatically else 'true' }}"
-      />
-      <button
-        class="toggle-switch {{ 'is-on' if runtime.start_queued_work_automatically else '' }}"
-        type="submit"
-        role="switch"
-        aria-checked="{{ 'true' if runtime.start_queued_work_automatically else 'false' }}"
-        aria-label="Start queued work automatically"
-      >
-        <span class="toggle-track" aria-hidden="true"><span class="toggle-knob"></span></span>
-        <span class="toggle-state">{{ "On" if runtime.start_queued_work_automatically else "Off" }}</span>
-      </button>
     </form>
   </div>
 </section>

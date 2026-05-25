@@ -59,9 +59,6 @@ def page_context(request: Request, *, title: str, active: str) -> dict[str, obje
         "title": title,
         "active": active,
         "nav_items": NAV_ITEMS,
-        "runtime": DashboardRuntime.from_config(
-            state.config,
-            start_queued_work_automatically=state.store.start_queued_work_automatically(),
-        ),
+        "runtime": DashboardRuntime.from_config(state.config),
         "workflow_path": state.workflow_path,
     }

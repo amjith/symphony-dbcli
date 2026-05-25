@@ -55,7 +55,7 @@ class DashboardRuntime:
             profile=config.profile.active,
             dry_run=config.policy.dry_run,
             database_path=config.database.path,
-            start_queued_work_automatically=start_queued_work_automatically,
+            start_queued_work_automatically=True,
             workspace_strategy=config.workspace.strategy,
             workspace_root=config.workspace.root,
             bare_repos_root=config.workspace.bare_repos_root,
@@ -214,11 +214,7 @@ def render_index(
             title="Symphony DBCLI",
             summary=store.dashboard_summary(),
             workflow_graph=WorkflowGraphView.from_config(cfg, store),
-            runtime=runtime
-            or DashboardRuntime.from_config(
-                cfg,
-                start_queued_work_automatically=store.start_queued_work_automatically(),
-            ),
+            runtime=runtime or DashboardRuntime.from_config(cfg),
             ask_question=ask_question,
             ask_answer=ask_answer,
             cycle_result=cycle_result,
@@ -382,9 +378,7 @@ def _handler_factory(store: Store, state: DashboardState) -> type[BaseHTTPReques
                 self._send_html(
                     render_index(
                         store,
-                        state.runtime(
-                            start_queued_work_automatically=store.start_queued_work_automatically()
-                        ),
+                        state.runtime(),
                         state.config(),
                         ask_question=params.get("q", [""])[0],
                     )
@@ -469,12 +463,6 @@ def _handler_factory(store: Store, state: DashboardState) -> type[BaseHTTPReques
                     return
                 self._post_comment(comment_id)
                 return
-            if parsed.path == "/settings/start-queued-work-automatically":
-                params = self._read_form()
-                enabled = params.get("enabled", ["false"])[0] == "true"
-                store.set_start_queued_work_automatically(enabled)
-                self._redirect("/")
-                return
             if parsed.path == "/workflow/run-cycle":
                 self._run_dashboard_cycle()
                 return
@@ -556,7 +544,7 @@ def _handler_factory(store: Store, state: DashboardState) -> type[BaseHTTPReques
             self._send_html(
                 render_index(
                     store,
-                    state.runtime(start_queued_work_automatically=store.start_queued_work_automatically()),
+                    state.runtime(),
                     state.config(),
                     cycle_result=result,
                 )

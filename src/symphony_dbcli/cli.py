@@ -222,7 +222,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         f"base_branch={config.workspace.base_branch or 'default'} "
         f"retention_days={config.workspace.retention_days}"
     )
-    print(f"start_queued_work_automatically={store.start_queued_work_automatically()}")
+    print("auto_dispatch=always_on")
     print(
         f"issues={summary['issue_count']} running={summary['running_attempts']} queued={summary['queued_attempts']}"
     )
@@ -445,9 +445,8 @@ def _poll_loop(args: argparse.Namespace, store: Store, dashboard_state: Dashboar
             orchestrator.advance_ready_workflow_instances(
                 allowed_side_effects={"github_read", "github_write", "workspace_write"}
             )
-            if store.start_queued_work_automatically():
-                orchestrator.claim_available()
-                supervisor.start_queued(config)
+            orchestrator.claim_available()
+            supervisor.start_queued(config)
         except Exception as exc:  # Keep the dashboard alive.
             print(f"poll loop error: {exc}", file=sys.stderr)
         time.sleep(interval)

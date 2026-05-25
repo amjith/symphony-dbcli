@@ -21,6 +21,9 @@ def test_fastapi_dashboard_exposes_navigation_and_board(tmp_path: Path) -> None:
     assert 'href="/workflow"' in response.text
     assert "Backlog" in response.text
     assert "In Review" in response.text
+    assert "auto dispatch" in response.text
+    assert "data-theme-toggle" in response.text
+    assert "Switch to dark mode" in response.text
     assert '<link rel="stylesheet" href="/web-static/web.css"' in response.text
     assert "<style>" not in response.text
 
