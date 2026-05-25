@@ -16,3 +16,17 @@ def test_workflow_flowchart_preserves_workflow_shape() -> None:
     assert edges["fix_issue"].to_state == "worker_complete"
     assert edges["create_draft_pr"].trigger == "human"
     assert edges["create_draft_pr"].gate == "review_diff"
+
+
+def test_vertical_workflow_flowchart_stacks_workflow_depths() -> None:
+    chart = WorkflowFlowchartView.from_definition(default_config().workflow, orientation="vertical")
+    nodes = {node.name: node for node in chart.nodes}
+    edges = {edge.name: edge for edge in chart.edges}
+
+    assert chart.height > chart.width
+    assert nodes["todo"].y < nodes["claimed"].y < nodes["workspace_ready"].y
+    assert nodes["review"].y < nodes["pr_ready"].y
+    assert edges["fix_issue"].path.startswith(
+        f"M {nodes['setup_complete'].center_x} {nodes['setup_complete'].bottom_center_y}"
+    )
+    assert edges["create_draft_pr"].trigger == "human"

@@ -3,10 +3,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from textwrap import wrap
+from typing import Literal
 
 from .workflow_definition import WorkflowDefinitionConfig, WorkflowTransitionConfig
 
 type NamedTransition = tuple[str, WorkflowTransitionConfig]
+type FlowOrientation = Literal["horizontal", "vertical"]
 
 
 _NODE_WIDTH = 190
@@ -15,6 +17,8 @@ _MARGIN_X = 24
 _MARGIN_Y = 24
 _COLUMN_GAP = 110
 _ROW_GAP = 28
+_VERTICAL_COLUMN_GAP = 48
+_VERTICAL_ROW_GAP = 72
 _DESCRIPTION_LINE_LIMIT = 29
 _DESCRIPTION_LINE_COUNT = 2
 
@@ -39,6 +43,18 @@ class WorkflowFlowNodeView:
     @property
     def right_center_x(self) -> int:
         return self.x + self.width
+
+    @property
+    def top_center_y(self) -> int:
+        return self.y
+
+    @property
+    def bottom_center_y(self) -> int:
+        return self.y + self.height
+
+    @property
+    def center_x(self) -> int:
+        return self.x + (self.width // 2)
 
     @property
     def center_y(self) -> int:
@@ -74,18 +90,19 @@ class WorkflowFlowchartView:
         workflow: WorkflowDefinitionConfig,
         *,
         state_counts: Mapping[str, int] | None = None,
+        orientation: FlowOrientation = "horizontal",
     ) -> WorkflowFlowchartView:
         counts = state_counts or {}
         depths = _state_depths(workflow)
         columns = _columns(workflow, depths)
-        nodes = _nodes(workflow, columns, counts)
+        nodes = _nodes(workflow, columns, counts, orientation)
         node_by_name = {node.name: node for node in nodes}
         edges = [
-            _edge_view(name, transition, node_by_name, edge_index)
+            _edge_view(name, transition, node_by_name, edge_index, orientation)
             for edge_index, (name, transition) in enumerate(workflow.transitions.items())
             if transition.from_state in node_by_name and transition.to_state in node_by_name
         ]
-        width, height = _canvas_size(columns)
+        width, height = _canvas_size(columns, orientation)
         return cls(
             width=width,
             height=height,
@@ -145,11 +162,13 @@ def _nodes(
     workflow: WorkflowDefinitionConfig,
     columns: Mapping[int, list[str]],
     state_counts: Mapping[str, int],
+    orientation: FlowOrientation,
 ) -> list[WorkflowFlowNodeView]:
     nodes: list[WorkflowFlowNodeView] = []
-    for column, state_names in sorted(columns.items()):
-        for row, state_name in enumerate(state_names):
+    for depth, state_names in sorted(columns.items()):
+        for offset, state_name in enumerate(state_names):
             state = workflow.states[state_name]
+            x, y = _node_position(depth, offset, orientation)
             nodes.append(
                 WorkflowFlowNodeView(
                     name=state_name,
@@ -158,11 +177,23 @@ def _nodes(
                     terminal=state.terminal,
                     gate=state.gate,
                     active_count=state_counts.get(state_name, 0),
-                    x=_MARGIN_X + column * (_NODE_WIDTH + _COLUMN_GAP),
-                    y=_MARGIN_Y + row * (_NODE_HEIGHT + _ROW_GAP),
+                    x=x,
+                    y=y,
                 )
             )
     return nodes
+
+
+def _node_position(depth: int, offset: int, orientation: FlowOrientation) -> tuple[int, int]:
+    if orientation == "vertical":
+        return (
+            _MARGIN_X + offset * (_NODE_WIDTH + _VERTICAL_COLUMN_GAP),
+            _MARGIN_Y + depth * (_NODE_HEIGHT + _VERTICAL_ROW_GAP),
+        )
+    return (
+        _MARGIN_X + depth * (_NODE_WIDTH + _COLUMN_GAP),
+        _MARGIN_Y + offset * (_NODE_HEIGHT + _ROW_GAP),
+    )
 
 
 def _edge_view(
@@ -170,19 +201,32 @@ def _edge_view(
     transition: WorkflowTransitionConfig,
     node_by_name: Mapping[str, WorkflowFlowNodeView],
     edge_index: int,
+    orientation: FlowOrientation,
 ) -> WorkflowFlowEdgeView:
     source = node_by_name[transition.from_state]
     target = node_by_name[transition.to_state]
-    start_x = source.right_center_x
-    start_y = source.center_y
-    end_x = target.left_center_x
-    end_y = target.center_y
-    backward = end_x <= start_x
-    path, label_x, label_y = (
-        _backward_edge_path(start_x, start_y, end_x, end_y, edge_index)
-        if backward
-        else _forward_edge_path(start_x, start_y, end_x, end_y)
-    )
+    if orientation == "vertical":
+        start_x = source.center_x
+        start_y = source.bottom_center_y
+        end_x = target.center_x
+        end_y = target.top_center_y
+        backward = end_y <= start_y
+        path, label_x, label_y = (
+            _backward_vertical_edge_path(start_x, start_y, end_x, end_y, edge_index)
+            if backward
+            else _forward_vertical_edge_path(start_x, start_y, end_x, end_y)
+        )
+    else:
+        start_x = source.right_center_x
+        start_y = source.center_y
+        end_x = target.left_center_x
+        end_y = target.center_y
+        backward = end_x <= start_x
+        path, label_x, label_y = (
+            _backward_edge_path(start_x, start_y, end_x, end_y, edge_index)
+            if backward
+            else _forward_edge_path(start_x, start_y, end_x, end_y)
+        )
     return WorkflowFlowEdgeView(
         name=name,
         from_state=transition.from_state,
@@ -204,6 +248,17 @@ def _forward_edge_path(start_x: int, start_y: int, end_x: int, end_y: int) -> tu
     return path, (start_x + end_x) // 2, ((start_y + end_y) // 2) - 8
 
 
+def _forward_vertical_edge_path(
+    start_x: int,
+    start_y: int,
+    end_x: int,
+    end_y: int,
+) -> tuple[str, int, int]:
+    curve = max(44, (end_y - start_y) // 2)
+    path = f"M {start_x} {start_y} C {start_x} {start_y + curve} {end_x} {end_y - curve} {end_x} {end_y}"
+    return path, ((start_x + end_x) // 2) + 4, ((start_y + end_y) // 2) - 8
+
+
 def _backward_edge_path(
     start_x: int,
     start_y: int,
@@ -221,13 +276,34 @@ def _backward_edge_path(
     return path, midpoint_x, lane_y - 8
 
 
-def _canvas_size(columns: Mapping[int, list[str]]) -> tuple[int, int]:
+def _backward_vertical_edge_path(
+    start_x: int,
+    start_y: int,
+    end_x: int,
+    end_y: int,
+    edge_index: int,
+) -> tuple[str, int, int]:
+    lane_x = max(start_x, end_x) + 64 + (edge_index % 3) * 18
+    midpoint_y = (start_y + end_y) // 2
+    path = (
+        f"M {start_x} {start_y} "
+        f"C {start_x} {start_y + 56} {lane_x} {start_y + 56} {lane_x} {midpoint_y} "
+        f"C {lane_x} {end_y - 56} {end_x} {end_y - 56} {end_x} {end_y}"
+    )
+    return path, lane_x + 4, midpoint_y
+
+
+def _canvas_size(columns: Mapping[int, list[str]], orientation: FlowOrientation) -> tuple[int, int]:
     if not columns:
         return 320, 160
-    column_count = max(columns) + 1
-    row_count = max(len(states) for states in columns.values())
-    width = (_MARGIN_X * 2) + (column_count * _NODE_WIDTH) + ((column_count - 1) * _COLUMN_GAP)
-    height = (_MARGIN_Y * 2) + (row_count * _NODE_HEIGHT) + (max(row_count - 1, 0) * _ROW_GAP)
+    depth_count = max(columns) + 1
+    breadth_count = max(len(states) for states in columns.values())
+    if orientation == "vertical":
+        width = (_MARGIN_X * 2) + (breadth_count * _NODE_WIDTH) + ((breadth_count - 1) * _VERTICAL_COLUMN_GAP)
+        height = (_MARGIN_Y * 2) + (depth_count * _NODE_HEIGHT) + ((depth_count - 1) * _VERTICAL_ROW_GAP)
+        return width, height
+    width = (_MARGIN_X * 2) + (depth_count * _NODE_WIDTH) + ((depth_count - 1) * _COLUMN_GAP)
+    height = (_MARGIN_Y * 2) + (breadth_count * _NODE_HEIGHT) + (max(breadth_count - 1, 0) * _ROW_GAP)
     return width, height
 
 

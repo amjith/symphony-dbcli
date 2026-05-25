@@ -204,6 +204,14 @@ h2 {
   margin-top: 12px;
 }
 
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
 .narrow-panel {
   max-width: 560px;
 }
@@ -562,6 +570,227 @@ h2 {
   margin: 0;
 }
 
+.workflow-summary,
+.workflow-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.workflow-summary .panel {
+  min-width: 0;
+}
+
+.workflow-summary strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-size: 18px;
+}
+
+.workflow-detail-grid {
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  margin-top: 12px;
+}
+
+.flowchart-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flowchart-controls button {
+  min-height: 30px;
+  padding: 4px 9px;
+}
+
+.flowchart-controls span {
+  min-width: 44px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.workflow-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workflow-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend-line,
+.legend-box {
+  display: inline-block;
+}
+
+.legend-line {
+  width: 22px;
+  border-top: 2px solid #8491a3;
+}
+
+.legend-line.is-human {
+  border-color: #b4791f;
+  border-top-style: dashed;
+}
+
+.legend-box {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface);
+}
+
+.legend-box.is-terminal {
+  background: var(--surface-subtle);
+  border-color: #98a2b3;
+}
+
+.legend-box.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.workflow-flowchart {
+  max-height: 720px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(var(--surface-subtle), var(--surface-subtle)) padding-box,
+    repeating-linear-gradient(0deg, transparent, transparent 23px, rgb(120 130 145 / 10%) 24px),
+    repeating-linear-gradient(90deg, transparent, transparent 23px, rgb(120 130 145 / 10%) 24px);
+  cursor: grab;
+}
+
+.workflow-flowchart.is-panning {
+  cursor: grabbing;
+}
+
+.workflow-flowchart-canvas {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.workflow-flowchart svg {
+  display: block;
+  margin: 0 auto;
+  transform-origin: top left;
+}
+
+.workflow-flow-edge path {
+  fill: none;
+  stroke: #8491a3;
+  stroke-linecap: round;
+  stroke-width: 2;
+}
+
+.workflow-flow-edge.is-human path {
+  stroke: #b4791f;
+  stroke-dasharray: 6 5;
+}
+
+.workflow-flow-edge.is-backward path {
+  stroke-dasharray: 3 6;
+}
+
+.workflow-flow-edge.is-human.is-backward path {
+  stroke-dasharray: 7 5 3 5;
+}
+
+.workflow-flow-edge text {
+  fill: #4f5b6c;
+  font-size: 11px;
+  font-weight: 750;
+  paint-order: stroke;
+  stroke: var(--surface-subtle);
+  stroke-linejoin: round;
+  stroke-width: 5px;
+}
+
+.workflow-flow-edge.is-human text {
+  fill: #7b5415;
+}
+
+.workflow-flow-arrowhead {
+  fill: #8491a3;
+}
+
+.workflow-flow-arrowhead-human {
+  fill: #b4791f;
+}
+
+.workflow-flow-node rect {
+  fill: var(--surface);
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.workflow-flow-node.is-initial rect {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.workflow-flow-node.is-terminal rect {
+  fill: var(--surface-subtle);
+  stroke: #98a2b3;
+}
+
+.workflow-flow-node.has-gate rect {
+  stroke: #b4791f;
+}
+
+.workflow-flow-node.has-active rect {
+  fill: var(--accent-soft);
+}
+
+.workflow-flow-node-title,
+.workflow-flow-node-count,
+.workflow-flow-node-desc,
+.workflow-flow-node-meta {
+  pointer-events: none;
+}
+
+.workflow-flow-node-title {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.workflow-flow-node-count {
+  fill: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.workflow-flow-node-desc {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.workflow-flow-node-meta {
+  fill: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.compact-table-wrap {
+  overflow-x: auto;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
@@ -584,6 +813,12 @@ h2 {
 
 .data-table tr:last-child td {
   border-bottom: 0;
+}
+
+.compact-table th,
+.compact-table td {
+  padding: 8px 7px;
+  font-size: 12px;
 }
 
 .runtime-grid {
@@ -640,6 +875,7 @@ h2 {
   .page-title,
   .inline-form,
   .split-fields,
+  .workflow-detail-grid,
   .settings-list div {
     grid-template-columns: 1fr;
   }

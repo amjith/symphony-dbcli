@@ -3,17 +3,238 @@
 <a class="button-link" href="/workflow/edit">Edit</a>
 {% endblock %}
 {% block body %}
+<section class="workflow-summary">
+  <div class="panel">
+    <span class="kicker">Workflow File</span>
+    <strong><code>{{ workflow_path }}</code></strong>
+  </div>
+  <div class="panel">
+    <span class="kicker">Workspace</span>
+    <strong>{{ runtime.workspace_strategy }}</strong>
+  </div>
+  <div class="panel">
+    <span class="kicker">States</span>
+    <strong>{{ state_count }}</strong>
+  </div>
+  <div class="panel">
+    <span class="kicker">Transitions</span>
+    <strong>{{ transition_count }}</strong>
+  </div>
+  <div class="panel">
+    <span class="kicker">Human Gates</span>
+    <strong>{{ human_gate_count }}</strong>
+  </div>
+</section>
+
+<section class="panel flow-panel">
+  <div class="section-heading">
+    <div>
+      <h2>Workflow Flowchart</h2>
+      <span class="muted">{{ automatic_count }} automatic transitions · {{ human_gate_count }} human gates</span>
+    </div>
+    <div class="flowchart-controls" data-workflow-controls>
+      <button type="button" data-workflow-zoom="fit">Fit</button>
+      <button type="button" aria-label="Zoom out" data-workflow-zoom="out">-</button>
+      <span data-workflow-zoom-label>100%</span>
+      <button type="button" aria-label="Zoom in" data-workflow-zoom="in">+</button>
+      <button type="button" data-workflow-zoom="reset">Reset</button>
+    </div>
+  </div>
+
+  <div class="workflow-legend" aria-label="Workflow legend">
+    <span><i class="legend-line is-automatic"></i>Automatic</span>
+    <span><i class="legend-line is-human"></i>Human gate</span>
+    <span><i class="legend-box is-terminal"></i>Terminal</span>
+    <span><i class="legend-box is-active"></i>Active instance</span>
+  </div>
+
+  <div class="workflow-flowchart" data-workflow-flowchart>
+    <div class="workflow-flowchart-canvas" data-workflow-canvas>
+      <svg
+        data-workflow-svg
+        width="{{ workflow_chart.width }}"
+        height="{{ workflow_chart.height }}"
+        viewBox="0 0 {{ workflow_chart.width }} {{ workflow_chart.height }}"
+        role="img"
+        aria-label="Vertical workflow flowchart"
+      >
+        <defs>
+          <marker id="workflow-arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+            <path class="workflow-flow-arrowhead" d="M 0 0 L 10 4 L 0 8 z"></path>
+          </marker>
+          <marker id="workflow-arrow-human" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+            <path class="workflow-flow-arrowhead-human" d="M 0 0 L 10 4 L 0 8 z"></path>
+          </marker>
+        </defs>
+        {% for edge in workflow_chart.edges %}
+        <g class="workflow-flow-edge {{ 'is-human' if edge.trigger == 'human' else '' }} {{ 'is-backward' if edge.backward else '' }}">
+          <title>
+            {{ edge.name }}: {{ edge.from_state }} to {{ edge.to_state }} via {{ edge.action }}{% if edge.condition %}; {{ edge.condition }}{% endif %}
+          </title>
+          <path
+            d="{{ edge.path }}"
+            marker-end="url(#{{ 'workflow-arrow-human' if edge.trigger == 'human' else 'workflow-arrow' }})"
+          ></path>
+          <text x="{{ edge.label_x }}" y="{{ edge.label_y }}">{{ edge.name }}</text>
+        </g>
+        {% endfor %}
+        {% for node in workflow_chart.nodes %}
+        <g
+          class="workflow-flow-node {{ 'is-initial' if node.name == workflow_chart.initial_state else '' }} {{ 'is-terminal' if node.terminal else '' }} {{ 'has-gate' if node.gate else '' }} {{ 'has-active' if node.active_count else '' }}"
+          transform="translate({{ node.x }} {{ node.y }})"
+        >
+          <title>{{ node.description }}</title>
+          <rect width="{{ node.width }}" height="{{ node.height }}" rx="8"></rect>
+          <text class="workflow-flow-node-title" x="12" y="23">{{ node.name }}</text>
+          {% if node.active_count %}
+          <text class="workflow-flow-node-count" x="{{ node.width - 12 }}" y="23" text-anchor="end">{{ node.active_count }} active</text>
+          {% endif %}
+          {% if node.description_lines %}
+          {% for line in node.description_lines %}
+          <text class="workflow-flow-node-desc" x="12" y="{{ 45 + (loop.index0 * 14) }}">{{ line }}</text>
+          {% endfor %}
+          {% else %}
+          <text class="workflow-flow-node-desc" x="12" y="45">-</text>
+          {% endif %}
+          {% if node.gate %}
+          <text class="workflow-flow-node-meta" x="12" y="80">gate: {{ node.gate }}</text>
+          {% elif node.terminal %}
+          <text class="workflow-flow-node-meta" x="12" y="80">terminal</text>
+          {% elif node.name == workflow_chart.initial_state %}
+          <text class="workflow-flow-node-meta" x="12" y="80">initial</text>
+          {% endif %}
+        </g>
+        {% endfor %}
+      </svg>
+    </div>
+  </div>
+</section>
+
+<section class="workflow-detail-grid">
+  <div class="panel">
+    <div class="section-heading">
+      <h2>States</h2>
+      <span class="muted">{{ state_count }}</span>
+    </div>
+    <div class="compact-table-wrap">
+      <table class="data-table compact-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Role</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for name, state in states %}
+          <tr>
+            <td><code>{{ name }}</code></td>
+            <td>
+              {% if name == workflow_chart.initial_state %}initial{% elif state.terminal %}terminal{% elif state.gate %}gate{% else %}state{% endif %}
+            </td>
+            <td>{{ state.description }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="section-heading">
+      <h2>Pending Gates</h2>
+      <span class="muted">{{ pending_gates|length }}</span>
+    </div>
+    {% if pending_gates %}
+    <div class="compact-table-wrap">
+      <table class="data-table compact-table">
+        <thead>
+          <tr>
+            <th>Gate</th>
+            <th>Issue</th>
+            <th>Task</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for gate in pending_gates %}
+          <tr>
+            <td><code>{{ gate["transition_name"] }}</code></td>
+            <td>{{ gate["repo"] }}#{{ gate["issue_number"] }}</td>
+            <td>{{ gate["task_type"] }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">No pending gates</div>
+    {% endif %}
+  </div>
+</section>
+
 <section class="panel">
-  <dl class="settings-list">
-    <div>
-      <dt>Workflow File</dt>
-      <dd><code>{{ workflow_path }}</code></dd>
-    </div>
-    <div>
-      <dt>Workspace</dt>
-      <dd>{{ runtime.workspace_strategy }}</dd>
-    </div>
-  </dl>
+  <div class="section-heading">
+    <h2>Transitions</h2>
+    <span class="muted">{{ transition_count }}</span>
+  </div>
+  <div class="compact-table-wrap">
+    <table class="data-table compact-table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>From</th>
+          <th>To</th>
+          <th>Trigger</th>
+          <th>Action</th>
+          <th>Condition</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for name, transition in transitions %}
+        <tr>
+          <td><code>{{ name }}</code></td>
+          <td>{{ transition.from_state }}</td>
+          <td>{{ transition.to_state }}</td>
+          <td>{{ transition.trigger }}{% if transition.gate %} · {{ transition.gate }}{% endif %}</td>
+          <td><code>{{ transition.action }}</code></td>
+          <td>{{ transition.condition or "-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-heading">
+    <h2>Versions</h2>
+    <span class="muted">{{ workflow_history|length }}</span>
+  </div>
+  {% if workflow_history %}
+  <div class="compact-table-wrap">
+    <table class="data-table compact-table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Status</th>
+          <th>Hash</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for version in workflow_history %}
+        <tr>
+          <td>{{ version["id"] }}</td>
+          <td>{{ version["status"] }}</td>
+          <td><code>{{ version["content_hash"][:12] }}</code></td>
+          <td>{{ version["created_at"] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No recorded workflow versions</div>
+  {% endif %}
 </section>
 {% endblock %}
-

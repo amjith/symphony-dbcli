@@ -77,6 +77,21 @@ def test_fastapi_dashboard_hierarchy_routes_render(tmp_path: Path) -> None:
         assert expected in response.text
 
 
+def test_fastapi_workflow_page_renders_vertical_flowchart(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.get("/workflow")
+
+    assert response.status_code == 200
+    assert "Workflow Flowchart" in response.text
+    assert 'aria-label="Vertical workflow flowchart"' in response.text
+    assert "data-workflow-controls" in response.text
+    assert "data-workflow-flowchart" in response.text
+    assert "fix_issue" in response.text
+    assert "create_draft_pr" in response.text
+    assert "Pending Gates" in response.text
+
+
 def test_fastapi_health_reports_runtime_context(tmp_path: Path) -> None:
     client = _client(tmp_path)
 

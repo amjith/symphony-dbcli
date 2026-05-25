@@ -96,8 +96,97 @@ function setupKanbanDrag() {
 
 setupKanbanDrag();
 
+function setupWorkflowFlowchart() {
+  const frame = document.querySelector("[data-workflow-flowchart]");
+  const svg = document.querySelector("[data-workflow-svg]");
+  const label = document.querySelector("[data-workflow-zoom-label]");
+  const controls = document.querySelector("[data-workflow-controls]");
+  if (!frame || !svg || !label || !controls || frame.dataset.workflowReady === "true") {
+    return;
+  }
+
+  frame.dataset.workflowReady = "true";
+  const baseWidth = Number(svg.getAttribute("width")) || 1;
+  const baseHeight = Number(svg.getAttribute("height")) || 1;
+  let scale = 1;
+  let isPanning = false;
+  let panStartX = 0;
+  let panStartY = 0;
+  let scrollStartLeft = 0;
+  let scrollStartTop = 0;
+
+  function applyScale(nextScale) {
+    scale = Math.max(0.35, Math.min(2, nextScale));
+    svg.style.width = `${Math.round(baseWidth * scale)}px`;
+    svg.style.height = `${Math.round(baseHeight * scale)}px`;
+    label.textContent = `${Math.round(scale * 100)}%`;
+  }
+
+  function fitToFrame() {
+    const widthScale = (frame.clientWidth - 24) / baseWidth;
+    const heightScale = (frame.clientHeight - 24) / baseHeight;
+    applyScale(Math.min(1, widthScale, heightScale));
+    frame.scrollTo({ left: 0, top: 0 });
+  }
+
+  controls.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-workflow-zoom]");
+    if (!button) {
+      return;
+    }
+    const action = button.dataset.workflowZoom;
+    if (action === "fit") {
+      fitToFrame();
+    } else if (action === "out") {
+      applyScale(scale - 0.15);
+    } else if (action === "in") {
+      applyScale(scale + 0.15);
+    } else {
+      applyScale(1);
+      frame.scrollTo({ left: 0, top: 0 });
+    }
+  });
+
+  frame.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.closest("a, button, input, textarea, select")) {
+      return;
+    }
+    isPanning = true;
+    panStartX = event.clientX;
+    panStartY = event.clientY;
+    scrollStartLeft = frame.scrollLeft;
+    scrollStartTop = frame.scrollTop;
+    frame.classList.add("is-panning");
+    frame.setPointerCapture(event.pointerId);
+  });
+
+  frame.addEventListener("pointermove", (event) => {
+    if (!isPanning) {
+      return;
+    }
+    frame.scrollLeft = scrollStartLeft - (event.clientX - panStartX);
+    frame.scrollTop = scrollStartTop - (event.clientY - panStartY);
+  });
+
+  frame.addEventListener("pointerup", (event) => {
+    isPanning = false;
+    frame.classList.remove("is-panning");
+    frame.releasePointerCapture(event.pointerId);
+  });
+
+  frame.addEventListener("pointercancel", () => {
+    isPanning = false;
+    frame.classList.remove("is-panning");
+  });
+
+  applyScale(1);
+}
+
+setupWorkflowFlowchart();
+
 document.body.addEventListener("htmx:afterSwap", (event) => {
   if (event.target.id === "dashboard-main") {
     setupKanbanDrag();
+    setupWorkflowFlowchart();
   }
 });
