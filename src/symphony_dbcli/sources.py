@@ -347,7 +347,7 @@ class SourceRepository:
         with self._session_factory() as session:
             visible_match_ids = _visible_match_ids(session, source_id, query)
             if query.strip() and not visible_match_ids:
-                return SourceItemPage(items=[], total=0, page=1, limit=page_limit, query=query.strip())
+                return SourceItemPage(items=[], total=0, page=1, limit=page_limit, query=query)
             conditions = [
                 SourceItem.source_id == source_id,
                 SourceItem.state == "open",
@@ -382,7 +382,7 @@ class SourceRepository:
                 total=total,
                 page=page_number,
                 limit=page_limit,
-                query=query.strip(),
+                query=query,
             )
 
     def linked_source_items(self, source_item_id: int) -> list[SourceItemView]:

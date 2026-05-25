@@ -193,12 +193,12 @@ def test_fastapi_board_searches_backlog_with_sqlite_fts_body_matches(tmp_path: P
     source_id = _add_source(client, "dbcli/litecli")
     _sync_source(client, source_id)
 
-    board = client.get(f"/board?source_id={source_id}&backlog_q=ftsneedle")
+    board = client.get(f"/board?source_id={source_id}&backlog_q=ftsneedle%20")
 
     assert board.status_code == 200
     assert "Cache cleanup" in board.text
     assert "Another bug" not in board.text
-    assert 'value="ftsneedle"' in board.text
+    assert 'value="ftsneedle "' in board.text
     assert "1-1 of 1" in board.text
 
 
@@ -211,12 +211,12 @@ def test_fastapi_board_searches_work_columns_with_sqlite_fts(tmp_path: Path) -> 
     _activate_source_item(client, matching_source_item_id, task_type="code")
     _activate_source_item(client, other_source_item_id, task_type="code")
 
-    board = client.get(f"/board?source_id={source_id}&todo_q=ftsneedle")
+    board = client.get(f"/board?source_id={source_id}&todo_q=ftsneedle%20")
 
     assert board.status_code == 200
     assert "Cache cleanup" in board.text
     assert "Another bug" not in board.text
-    assert 'value="ftsneedle"' in board.text
+    assert 'value="ftsneedle "' in board.text
     assert "work item #1" in board.text
     assert "work item #2" not in board.text
 

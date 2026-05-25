@@ -38,16 +38,16 @@ class BoardFilters:
     backlog_page: int = 1
 
     def query_for(self, state: str) -> str:
-        return self.query_values.get(SEARCH_PARAM_BY_STATE[state], "").strip()
+        return self.query_values.get(SEARCH_PARAM_BY_STATE[state], "")
 
     @property
     def query_values(self) -> dict[str, str]:
         return {
-            "backlog_q": self.backlog_q.strip(),
-            "todo_q": self.todo_q.strip(),
-            "in_progress_q": self.in_progress_q.strip(),
-            "in_review_q": self.in_review_q.strip(),
-            "done_q": self.done_q.strip(),
+            "backlog_q": self.backlog_q,
+            "todo_q": self.todo_q,
+            "in_progress_q": self.in_progress_q,
+            "in_review_q": self.in_review_q,
+            "done_q": self.done_q,
         }
 
 
