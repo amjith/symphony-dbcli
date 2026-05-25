@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 from symphony_dbcli.config import WorkflowConfig
 from symphony_dbcli.dashboard import DashboardRuntime
 from symphony_dbcli.db import SessionFactory
-from symphony_dbcli.sources import SourceRepository
+from symphony_dbcli.sources import SourceRepository, SourceSyncClient
 from symphony_dbcli.store import Store
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -24,6 +24,7 @@ class WebAppState:
     store: Store
     session_factory: SessionFactory
     workflow_path: str
+    source_sync_client: SourceSyncClient | None = None
 
 
 @dataclass(frozen=True)

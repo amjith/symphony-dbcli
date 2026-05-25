@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block page_actions %}
 {% if selected_source %}
-<button type="button" disabled title="GitHub sync is the next implementation slice">Sync Source</button>
+<form method="post" action="/sources/{{ selected_source.id }}/sync">
+  <button type="submit">Sync Source</button>
+</form>
 {% else %}
 <a class="button-link" href="/sources/new">Add Source</a>
 {% endif %}
@@ -41,7 +43,22 @@
       <h2>{{ column.name|title }}</h2>
       <span>{{ column.count }}</span>
     </div>
+    {% if column.items %}
+    <div class="source-card-list">
+      {% for item in column.items %}
+      <article class="source-card">
+        <div>
+          <span class="source-card-kind">{{ item.kind_label }}</span>
+          <a href="{{ item.url }}" target="_blank" rel="noreferrer">#{{ item.number }}</a>
+        </div>
+        <strong>{{ item.title }}</strong>
+        <span class="muted">{{ item.author or "unknown author" }}</span>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}
     <div class="empty-state">No {{ column.name }} items</div>
+    {% endif %}
   </div>
   {% endfor %}
 </section>

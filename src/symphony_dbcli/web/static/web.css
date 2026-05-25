@@ -289,6 +289,37 @@ h2 {
   text-align: center;
 }
 
+.source-card-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.source-card {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface-subtle);
+}
+
+.source-card strong {
+  overflow-wrap: anywhere;
+}
+
+.source-card-kind {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border-radius: 999px;
+  padding: 0 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .inline-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) max-content;

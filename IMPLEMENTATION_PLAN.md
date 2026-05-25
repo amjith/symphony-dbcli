@@ -584,13 +584,13 @@ Implementation checklist:
 - [ ] Add SQLAlchemy 2.0 models and session/repository boundaries for work-item
   data.
 - [x] Add Alembic migration scaffolding.
-- [ ] Add Alembic revisions for new source/work-item schema changes as those
-  models are introduced.
+- [x] Add Alembic revisions for new source schema changes.
+- [ ] Add Alembic revisions for new work-item schema changes.
 - [ ] Add HTMX and SortableJS assets for server-rendered interactive kanban
   behavior.
 - [x] Add SQLite/Alembic table for `sources`.
-- [ ] Add SQLite/Alembic tables for `source_sync_runs` and `source_items`.
-- [ ] Implement GitHub source sync for open issues and open PRs.
+- [x] Add SQLite/Alembic tables for `source_sync_runs` and `source_items`.
+- [x] Implement GitHub source sync for open issues and open PRs.
 - [ ] Add source filter support for labels, authors, stale items, and date
   ranges.
 - [x] Build a basic Sources dashboard page with add/list controls.
@@ -599,7 +599,8 @@ Implementation checklist:
   storage.
 - [x] Build the source-scoped kanban board shell with backlog, todo, in
   progress, in review, and done columns.
-- [ ] Populate source-scoped kanban columns from work-item state.
+- [x] Populate source-scoped backlog from synced source items.
+- [ ] Populate todo, in progress, in review, and done from work-item state.
 - [ ] Implement backlog-to-todo activation with task type and optional user
   hint.
 - [ ] Default issue-with-linked-PR and PR cards to review/fix mode.
@@ -641,6 +642,9 @@ Progress notes:
   available, source tabs link to isolated board views, the Sources table links
   to each source board, and the sync action is shown as pending instead of a
   dead button until GitHub source sync lands.
+- 2026-05-25: Implemented GitHub source sync. Source sync now fetches open
+  issues and pull requests, records sync runs and source items in SQLite, and
+  renders synced items in the selected source board backlog.
 
 ## Durable Cross-Project Spec
 

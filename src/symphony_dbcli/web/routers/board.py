@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import Response
 
-from symphony_dbcli.sources import SourceRepository, SourceView
+from symphony_dbcli.sources import SourceItemView, SourceRepository, SourceView
 from symphony_dbcli.web.dependencies import page_context, source_repository, templates
 
 router = APIRouter(tags=["board"])
@@ -15,6 +15,7 @@ COLUMN_NAMES = ("backlog", "todo", "in progress", "in review", "done")
 @dataclass(frozen=True)
 class BoardColumn:
     name: str
+    items: list[SourceItemView]
     count: int = 0
 
 
@@ -27,7 +28,7 @@ def index(request: Request, source_id: int | None = None) -> Response:
     context = page_context(request, title=_board_title(selected_source), active="board")
     context["sources"] = sources
     context["selected_source"] = selected_source
-    context["columns"] = [BoardColumn(name=name) for name in COLUMN_NAMES]
+    context["columns"] = _board_columns(repo, selected_source)
     return templates.TemplateResponse(
         request=request,
         name="board/index.html",
@@ -50,3 +51,11 @@ def _selected_source(
 
 def _board_title(source: SourceView | None) -> str:
     return f"Board · {source.repo}" if source else "Board"
+
+
+def _board_columns(repo: SourceRepository, selected_source: SourceView | None) -> list[BoardColumn]:
+    backlog_items = repo.open_source_items(selected_source.id) if selected_source else []
+    return [
+        BoardColumn(name="backlog", items=backlog_items, count=len(backlog_items)),
+        *[BoardColumn(name=name, items=[]) for name in COLUMN_NAMES[1:]],
+    ]

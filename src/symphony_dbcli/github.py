@@ -27,6 +27,8 @@ class PullRequest:
     url: str
     title: str
     state: str = ""
+    author: str = ""
+    updated_at: str = ""
     merged_at: str = ""
     head_sha: str = ""
     head_ref: str = ""
@@ -375,6 +377,8 @@ def _pull_request_from_json(data: dict[str, Any]) -> PullRequest:
         url=str(data["html_url"]),
         title=str(data["title"]),
         state=str(data.get("state") or ""),
+        author=str(_json_object(data.get("user")).get("login") or ""),
+        updated_at=str(data.get("updated_at") or ""),
         merged_at=str(data.get("merged_at") or ""),
         head_sha=_head_sha(data),
         head_ref=_head_ref(data),

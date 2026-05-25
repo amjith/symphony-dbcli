@@ -7,6 +7,7 @@ from starlette.responses import Response
 from symphony_dbcli.config import WorkflowConfig, default_config
 from symphony_dbcli.db import create_db_engine, create_session_factory
 from symphony_dbcli.models import create_model_tables
+from symphony_dbcli.sources import SourceSyncClient
 from symphony_dbcli.store import Store
 
 from .dependencies import STATIC_DIR, WebAppState
@@ -18,6 +19,7 @@ def create_app(
     store: Store | None = None,
     *,
     workflow_path: str = "WORKFLOW.md",
+    source_sync_client: SourceSyncClient | None = None,
 ) -> FastAPI:
     active_config = config or default_config()
     active_store = store or Store(active_config.database.path)
@@ -32,6 +34,7 @@ def create_app(
         store=active_store,
         session_factory=session_factory,
         workflow_path=workflow_path,
+        source_sync_client=source_sync_client,
     )
     app.mount("/web-static", StaticFiles(directory=str(STATIC_DIR)), name="web_static")
 
