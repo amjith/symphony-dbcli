@@ -1,9 +1,63 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, Engine, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from dataclasses import dataclass
+
+from sqlalchemy import (
+    Boolean,
+    Engine,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
+
+
+@dataclass(frozen=True)
+class SQLiteColumnRepair:
+    table_name: str
+    column_name: str
+    column_definition: str
+    backfill_sql: str = ""
+
+
+_SQLITE_COLUMN_REPAIRS = (
+    SQLiteColumnRepair("work_items", "active_pr_source_item_id", "active_pr_source_item_id INTEGER"),
+    SQLiteColumnRepair(
+        "source_items",
+        "disposition",
+        "disposition VARCHAR(32)",
+        "UPDATE source_items SET disposition = 'active' WHERE disposition IS NULL",
+    ),
+    SQLiteColumnRepair(
+        "source_items",
+        "disposition_note",
+        "disposition_note TEXT",
+        "UPDATE source_items SET disposition_note = '' WHERE disposition_note IS NULL",
+    ),
+    SQLiteColumnRepair("source_items", "disposition_at", "disposition_at VARCHAR(32)"),
+    SQLiteColumnRepair(
+        "work_items",
+        "disposition",
+        "disposition VARCHAR(32)",
+        "UPDATE work_items SET disposition = 'active' WHERE disposition IS NULL",
+    ),
+    SQLiteColumnRepair(
+        "work_items",
+        "disposition_note",
+        "disposition_note TEXT",
+        "UPDATE work_items SET disposition_note = '' WHERE disposition_note IS NULL",
+    ),
+    SQLiteColumnRepair("work_items", "disposition_at", "disposition_at VARCHAR(32)"),
+    SQLiteColumnRepair("work_item_runs", "attempt_id", "attempt_id INTEGER"),
+    SQLiteColumnRepair("work_item_runs", "workflow_instance_id", "workflow_instance_id INTEGER"),
+)
 
 
 class Source(Base):
@@ -173,3 +227,27 @@ class WorkItemRun(Base):
 
 def create_model_tables(engine: Engine) -> None:
     Base.metadata.create_all(engine)
+    repair_sqlite_model_tables(engine)
+
+
+def repair_sqlite_model_tables(engine: Engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+
+    inspector = inspect(engine)
+    column_names_by_table = {
+        table_name: {column["name"] for column in inspector.get_columns(table_name)}
+        for table_name in inspector.get_table_names()
+    }
+    with engine.begin() as connection:
+        for repair in _SQLITE_COLUMN_REPAIRS:
+            column_names = column_names_by_table.get(repair.table_name)
+            if column_names is None:
+                continue
+            if repair.column_name not in column_names:
+                connection.execute(
+                    text(f"ALTER TABLE {repair.table_name} ADD COLUMN {repair.column_definition}")
+                )
+                column_names.add(repair.column_name)
+            if repair.backfill_sql:
+                connection.execute(text(repair.backfill_sql))
