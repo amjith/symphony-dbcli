@@ -620,7 +620,7 @@ Implementation checklist:
 - [x] Auto-mark work items done on external PR merge or issue close with
   explicit outcome.
 - [x] Add ignore/archive support for source items and work items.
-- [ ] Update Ask Symphony for source, work item, and kanban-state questions.
+- [x] Update Ask Symphony for source, work item, and kanban-state questions.
 - [x] Add fast local tests for source sync, backlog-to-todo activation, and
   kanban state transitions.
 - [x] Add fast local tests for grouped cards and active PR selection.
@@ -672,6 +672,9 @@ Progress notes:
   `source.sync`, `source.sync_all`, `work_item.activate`, `work_item.move`,
   `work_item.link_source_item`, and `work_item.select_active_pr`, plus
   `PrimitiveContext` fields for work-item-aware execution.
+- 2026-05-25: Updated Ask Symphony to answer board status, source sync status,
+  source item, and work item questions with dashboard links, and rendered those
+  answers inline on the FastAPI Ask page.
 
 ## Durable Cross-Project Spec
 

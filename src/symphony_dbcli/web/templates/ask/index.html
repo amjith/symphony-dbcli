@@ -4,10 +4,27 @@
   <form class="ask-form" method="get" action="/ask">
     <label for="question">Question</label>
     <div class="inline-form">
-      <input id="question" type="search" name="q" placeholder="Ask about workers, tasks, timing, or workflow state" />
+      <input
+        id="question"
+        type="search"
+        name="q"
+        placeholder="Ask about workers, tasks, timing, or workflow state"
+        value="{{ question }}"
+      />
       <button type="submit">Ask</button>
     </div>
   </form>
 </section>
+{% if answer %}
+<section class="panel flow-panel">
+  <p>{{ answer.text }}</p>
+  {% if answer.links %}
+  <div class="answer-links">
+    {% for link in answer.links %}
+    <a href="{{ link.url }}">{{ link.label }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endif %}
 {% endblock %}
-

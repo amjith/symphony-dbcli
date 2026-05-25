@@ -397,6 +397,18 @@ def test_fastapi_sources_reject_invalid_repo(tmp_path: Path) -> None:
     assert "owner/name format" in response.text
 
 
+def test_fastapi_ask_renders_inline_board_answer(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    _add_source(client, "dbcli/litecli")
+
+    response = client.get("/ask?q=What%20is%20the%20board%20status%3F")
+
+    assert response.status_code == 200
+    assert "Board status across 1 source(s)" in response.text
+    assert 'href="/board"' in response.text
+    assert 'href="/work-items"' in response.text
+
+
 def _client(tmp_path: Path, source_sync_client: SourceSyncClient | None = None) -> TestClient:
     config = replace(default_config(), database=DatabaseConfig(path=str(tmp_path / "symphony.db")))
     store = Store(config.database.path)

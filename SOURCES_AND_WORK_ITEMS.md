@@ -842,7 +842,7 @@ Likely new primitives:
 - [x] Auto-mark work items done when linked PRs merge or linked issues close
   externally, recording outcome.
 - [x] Add opt-in archive/ignore support for source items and work items.
-- [ ] Update Ask Symphony to answer source, work item, and board-state
+- [x] Update Ask Symphony to answer source, work item, and board-state
   questions.
 - [x] Build fast local tests for source sync, backlog-to-todo activation, and
   kanban state transitions.

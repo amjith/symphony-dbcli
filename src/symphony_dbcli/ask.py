@@ -4,10 +4,17 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
+from sqlalchemy import select
+
+from .db import SessionFactory, create_db_engine, create_session_factory
+from .models import Source, SourceItem, WorkItem, WorkItemLink, create_model_tables
+from .sources import SourceRepository
 from .store import Store
 from .types import AttemptSummary
+from .work_items import KANBAN_STATES, STATE_LABELS, WorkItemRepository
 
 ISSUE_RE = re.compile(r"(?:#|issue\s+)(?P<number>\d+)", re.IGNORECASE)
+WORK_ITEM_RE = re.compile(r"work\s+item\s+#?(?P<number>\d+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -40,6 +47,9 @@ def answer_question(store: Store, question: str) -> str:
 
 def answer_with_links(store: Store, question: str, fallback: AskFallback | None = None) -> AskAnswer:
     normalized = question.strip().lower()
+    board_answer = _answer_from_board(store, question, normalized)
+    if board_answer is not None:
+        return board_answer
     attempts = store.attempt_summaries()
     if not attempts:
         return AskAnswer("I do not have any worker attempts recorded yet.", [])
@@ -96,6 +106,98 @@ def answer_with_links(store: Store, question: str, fallback: AskFallback | None 
         if fallback_text:
             return AskAnswer(fallback_text, _links_for_attempt(latest))
     return AskAnswer(_structured_fallback(context), _links_for_attempt(latest))
+
+
+def _answer_from_board(store: Store, question: str, normalized: str) -> AskAnswer | None:
+    engine = create_db_engine(store.path)
+    create_model_tables(engine)
+    session_factory = create_session_factory(engine)
+    source_repo = SourceRepository(session_factory)
+    work_item_repo = WorkItemRepository(session_factory)
+    sources = source_repo.list_sources()
+    if not sources:
+        return None
+
+    work_item_match = WORK_ITEM_RE.search(question)
+    if work_item_match:
+        work_item_id = int(work_item_match.group("number"))
+        work_item = work_item_repo.detail(work_item_id)
+        if work_item is None:
+            return AskAnswer(
+                f"I do not have work item #{work_item_id}.", [AnswerLink("Work Items", "/work-items")]
+            )
+        return AskAnswer(
+            f"Work item #{work_item.id} is {work_item.state_label} for {work_item.source_label} #{work_item.source_number}.",
+            [AnswerLink(f"Work Item {work_item.id}", f"/work-items/{work_item.id}")],
+        )
+
+    issue_match = ISSUE_RE.search(question)
+    if issue_match:
+        answer = _answer_source_item_question(session_factory, int(issue_match.group("number")))
+        if answer is not None:
+            return answer
+
+    if any(
+        term in normalized for term in ("board", "backlog", "todo", "in progress", "review", "done", "status")
+    ):
+        backlog_count = sum(len(source_repo.backlog_source_items(source.id)) for source in sources)
+        state_counts = {
+            state: sum(len(work_item_repo.list_by_state(source.id, state)) for source in sources)
+            for state in KANBAN_STATES
+        }
+        summary = ", ".join(
+            [
+                f"Backlog: {backlog_count}",
+                *[f"{STATE_LABELS[state]}: {count}" for state, count in state_counts.items()],
+            ]
+        )
+        return AskAnswer(
+            f"Board status across {len(sources)} source(s): {summary}.",
+            [AnswerLink("Board", "/board"), AnswerLink("Work Items", "/work-items")],
+        )
+
+    if "source" in normalized or "sync" in normalized:
+        statuses = ", ".join(f"{source.repo}: {source.sync_status}" for source in sources)
+        return AskAnswer(
+            f"{len(sources)} source(s) are configured. {statuses}.",
+            [AnswerLink("Sources", "/sources")],
+        )
+    return None
+
+
+def _answer_source_item_question(session_factory: SessionFactory, number: int) -> AskAnswer | None:
+    with session_factory() as session:
+        row = session.execute(
+            select(Source, SourceItem)
+            .join(SourceItem, SourceItem.source_id == Source.id)
+            .where(SourceItem.number == number)
+            .order_by(Source.repo.asc())
+        ).first()
+        if row is None:
+            return None
+        source, source_item = row
+        work_item = session.scalars(
+            select(WorkItem)
+            .outerjoin(WorkItemLink, WorkItemLink.work_item_id == WorkItem.id)
+            .where(
+                WorkItem.disposition == "active",
+                (WorkItem.primary_source_item_id == source_item.id)
+                | (WorkItemLink.source_item_id == source_item.id),
+            )
+            .order_by(WorkItem.id.desc())
+        ).first()
+        if work_item:
+            return AskAnswer(
+                f"{source.repo} #{number} is linked to work item #{work_item.id}, currently {STATE_LABELS[work_item.state]}.",
+                [
+                    AnswerLink(f"Work Item {work_item.id}", f"/work-items/{work_item.id}"),
+                    AnswerLink("Board", f"/board?source_id={source.id}"),
+                ],
+            )
+        return AskAnswer(
+            f"{source.repo} #{number} is in {source_item.state} source state and has not been activated.",
+            [AnswerLink("Board", f"/board?source_id={source.id}")],
+        )
 
 
 def _summarize_attempt(row: AttemptSummary) -> str:

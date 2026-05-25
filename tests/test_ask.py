@@ -4,7 +4,11 @@ from pathlib import Path
 
 from symphony_dbcli.ask import answer_question, answer_with_links
 from symphony_dbcli.config import default_config, render_workflow
+from symphony_dbcli.db import create_db_engine, create_session_factory
+from symphony_dbcli.models import create_model_tables
+from symphony_dbcli.sources import SourceCreate, SourceItemUpsert, SourceRepository
 from symphony_dbcli.store import IssueSnapshot, Store
+from symphony_dbcli.work_items import WorkItemActivation, WorkItemRepository
 
 
 def test_ask_summarizes_issue_metrics(tmp_path: Path) -> None:
@@ -84,6 +88,45 @@ def test_ask_summarizes_pending_gates(tmp_path: Path) -> None:
     assert "1 human gate(s) are pending" in answer.text
     assert "dbcli/mycli#99:post_answer" in answer.text
     assert answer.links[0].url == "/issues/dbcli/mycli/99"
+
+
+def test_ask_answers_board_and_work_item_questions(tmp_path: Path) -> None:
+    store = Store(tmp_path / "symphony.db")
+    store.init()
+    engine = create_db_engine(store.path)
+    create_model_tables(engine)
+    session_factory = create_session_factory(engine)
+    source_repo = SourceRepository(session_factory)
+    work_item_repo = WorkItemRepository(session_factory)
+    source = source_repo.create_source(SourceCreate(repo="dbcli/litecli"))
+    source_repo.upsert_source_items(
+        source_id=source.id,
+        items=[
+            SourceItemUpsert(
+                kind="issue",
+                number=245,
+                title="Board issue",
+                url="https://github.com/dbcli/litecli/issues/245",
+                state="open",
+                author="alice",
+                labels=["bug"],
+                body="issue body",
+                github_updated_at="2026-05-25T01:00:00Z",
+            )
+        ],
+    )
+
+    board_answer = answer_with_links(store, "What is on the board?")
+    source_item = source_repo.backlog_source_items(source.id)[0]
+    work_item = work_item_repo.activate_source_item(
+        WorkItemActivation(source_item_id=source_item.id, task_type="code")
+    )
+    work_item_answer = answer_with_links(store, f"What about work item #{work_item.id}?")
+
+    assert "Backlog: 1" in board_answer.text
+    assert board_answer.links[0].url == "/board"
+    assert f"Work item #{work_item.id} is Todo" in work_item_answer.text
+    assert work_item_answer.links[0].url == f"/work-items/{work_item.id}"
 
 
 def _seed_issue(store: Store) -> None:
