@@ -5,6 +5,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
 from symphony_dbcli.config import WorkflowConfig, default_config
+from symphony_dbcli.db import create_db_engine, create_session_factory
+from symphony_dbcli.models import create_model_tables
 from symphony_dbcli.store import Store
 
 from .dependencies import STATIC_DIR, WebAppState
@@ -20,11 +22,15 @@ def create_app(
     active_config = config or default_config()
     active_store = store or Store(active_config.database.path)
     active_store.init()
+    engine = create_db_engine(active_config.database.path)
+    create_model_tables(engine)
+    session_factory = create_session_factory(engine)
 
     app = FastAPI(title="Symphony DBCLI")
     app.state.symphony = WebAppState(
         config=active_config,
         store=active_store,
+        session_factory=session_factory,
         workflow_path=workflow_path,
     )
     app.mount("/web-static", StaticFiles(directory=str(STATIC_DIR)), name="web_static")

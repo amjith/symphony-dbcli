@@ -171,6 +171,10 @@ h2 {
   box-shadow: var(--shadow);
 }
 
+.narrow-panel {
+  max-width: 560px;
+}
+
 .board {
   display: grid;
   grid-template-columns: repeat(5, minmax(180px, 1fr));
@@ -230,6 +234,22 @@ h2 {
   gap: 10px;
 }
 
+.form-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.form-error {
+  margin: 0;
+  color: var(--danger);
+}
+
+.quiet {
+  color: var(--muted);
+}
+
 .ask-form label,
 .stacked-form label,
 .kicker,
@@ -256,6 +276,30 @@ h2 {
 
 .settings-list dd {
   margin: 0;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th,
+.data-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.data-table th {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.data-table tr:last-child td {
+  border-bottom: 0;
 }
 
 .runtime-grid {
@@ -303,4 +347,3 @@ h2 {
     flex-direction: column;
   }
 }
-

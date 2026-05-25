@@ -579,19 +579,22 @@ Implementation checklist:
 - [x] Add FastAPI application scaffolding alongside the current dashboard.
 - [x] Split FastAPI routers by dashboard hierarchy: board, sources, work
   items, workers, workflow, ask, settings, and narrowly scoped JSON APIs.
-- [ ] Add SQLAlchemy 2.0 models and session/repository boundaries for new
-  source/work-item data.
+- [x] Add SQLAlchemy 2.0 models and session/repository boundaries for source
+  data.
+- [ ] Add SQLAlchemy 2.0 models and session/repository boundaries for work-item
+  data.
 - [x] Add Alembic migration scaffolding.
 - [ ] Add Alembic revisions for new source/work-item schema changes as those
   models are introduced.
 - [ ] Add HTMX and SortableJS assets for server-rendered interactive kanban
   behavior.
-- [ ] Add SQLite tables for `sources`, `source_sync_runs`, and `source_items`.
+- [x] Add SQLite/Alembic table for `sources`.
+- [ ] Add SQLite/Alembic tables for `source_sync_runs` and `source_items`.
 - [ ] Implement GitHub source sync for open issues and open PRs.
 - [ ] Add source filter support for labels, authors, stale items, and date
   ranges.
-- [ ] Build a Sources dashboard page with add/edit/sync controls and sync
-  status.
+- [x] Build a basic Sources dashboard page with add/list controls.
+- [ ] Add source edit/sync controls and sync status.
 - [ ] Add `work_items`, `work_item_links`, state history, and run/reason
   storage.
 - [ ] Build the kanban board with backlog, todo, in progress, in review, and
@@ -627,6 +630,9 @@ Progress notes:
   route modules that match the dashboard hierarchy, separate CSS/JS assets,
   a `serve-web` CLI command, SQLAlchemy base/session helpers, Alembic
   scaffolding, and fast route tests.
+- 2026-05-24: Added the first real Sources flow: `/sources/new`, source
+  validation, SQLite persistence through SQLAlchemy, an Alembic revision for
+  `sources`, and tests that cover adding and listing a repository source.
 
 ## Durable Cross-Project Spec
 

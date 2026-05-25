@@ -1,10 +1,32 @@
 {% extends "base.html" %}
 {% block page_actions %}
-<button type="button">Add Source</button>
+<a class="button-link" href="/sources/new">Add Source</a>
 {% endblock %}
 {% block body %}
 <section class="panel">
+  {% if sources %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Repository</th>
+        <th>Status</th>
+        <th>Last Sync</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for source in sources %}
+      <tr>
+        <td><strong>{{ source.repo }}</strong></td>
+        <td>{{ source.sync_status }}</td>
+        <td>{{ source.last_synced_at or "Never" }}</td>
+        <td>{{ source.created_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
   <div class="empty-state">No sources synced</div>
+  {% endif %}
 </section>
 {% endblock %}
-

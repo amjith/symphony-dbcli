@@ -7,8 +7,10 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from symphony_dbcli.db import Base
+from symphony_dbcli.models import Source
 
 config = context.config
+REGISTERED_MODELS = (Source,)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

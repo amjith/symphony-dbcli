@@ -31,6 +31,7 @@ def test_fastapi_dashboard_hierarchy_routes_render(tmp_path: Path) -> None:
     routes = {
         "/board": "Board",
         "/sources": "Sources",
+        "/sources/new": "Add Source",
         "/work-items": "Work Items",
         "/work-items/42": "Work Item #42",
         "/workers": "Workers",
@@ -66,6 +67,36 @@ def test_fastapi_favicon_does_not_generate_console_noise(tmp_path: Path) -> None
     response = client.get("/favicon.ico")
 
     assert response.status_code == 204
+
+
+def test_fastapi_sources_can_be_added_and_listed(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    new_page = client.get("/sources/new")
+    assert new_page.status_code == 200
+    assert 'action="/sources"' in new_page.text
+
+    response = client.post(
+        "/sources",
+        data={"repo": "dbcli/litecli"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/sources"
+
+    sources = client.get("/sources")
+    assert sources.status_code == 200
+    assert "dbcli/litecli" in sources.text
+    assert "never" in sources.text
+
+
+def test_fastapi_sources_reject_invalid_repo(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.post("/sources", data={"repo": "not-a-repo"})
+
+    assert response.status_code == 400
+    assert "owner/name format" in response.text
 
 
 def _client(tmp_path: Path) -> TestClient:
