@@ -97,6 +97,9 @@ def create_app(
 
 
 def create_app_from_env() -> FastAPI:
+    from symphony_dbcli.env import load_local_env
+
+    load_local_env()
     workflow_path = os.environ.get("SYMPHONY_WORKFLOW", "WORKFLOW.md")
     profile = os.environ.get("SYMPHONY_PROFILE") or None
     run_runtime = os.environ.get("SYMPHONY_RUN_RUNTIME") == "1"

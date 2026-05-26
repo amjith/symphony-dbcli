@@ -380,7 +380,10 @@ def test_fastapi_source_item_activation_creates_todo_work_item(tmp_path: Path) -
     assert 'data-work-item-id="1"' in board.text
     assert "code" in board.text
     assert "Fix completion crash" in work_items.text
+    assert 'href="/work-items/1">Fix completion crash</a>' in work_items.text
+    assert ">#1</a> Fix completion crash" not in work_items.text
     assert "Prefer unit tests." in detail.text
+    assert "<dt>ID</dt>" not in detail.text
     assert "Runs / Attempts" in detail.text
     assert "not claimed" in detail.text
 
@@ -477,6 +480,7 @@ def test_fastapi_work_item_detail_links_attempts(tmp_path: Path) -> None:
 
     assert detail.status_code == 200
     assert "Runs / Attempts" in detail.text
+    assert "<th>Run</th>" not in detail.text
     assert f'href="/attempts/{attempt_id}"' in detail.text
     assert f"Attempt #{attempt_id}" in detail.text
     assert "needs_review" in detail.text
@@ -523,7 +527,8 @@ def test_fastapi_work_item_detail_includes_related_attempts_without_runs(tmp_pat
     assert f"Attempt #{linked_attempt_id}" in detail.text
     assert f'href="/attempts/{legacy_attempt_id}"' in detail.text
     assert f"Attempt #{legacy_attempt_id}" in detail.text
-    assert "no run" in detail.text
+    assert "<th>Run</th>" not in detail.text
+    assert "no run" not in detail.text
 
 
 def test_fastapi_operations_page_lists_operation_runs(tmp_path: Path) -> None:
@@ -882,6 +887,17 @@ def test_fastapi_attempt_and_issue_pages_cover_review_actions(tmp_path: Path) ->
         title="Research Answer",
         body="Worker result body",
     )
+    timeline_id = store.record_timeline_event(
+        attempt_id,
+        phase="codex",
+        event_type="started",
+        message="Started codex exec",
+    )
+    with store.connect() as conn:
+        conn.execute(
+            "UPDATE worker_timeline_events SET started_at = ? WHERE id = ?",
+            ("2026-01-25T12:00:00Z", timeline_id),
+        )
     store.record_comment(
         attempt_id,
         repo="dbcli/litecli",
@@ -908,6 +924,8 @@ def test_fastapi_attempt_and_issue_pages_cover_review_actions(tmp_path: Path) ->
     assert "post_answer" in attempt.text
     assert "Worker result body" in attempt.text
     assert "Suggested reply body" in attempt.text
+    assert "Started codex exec" in attempt.text
+    assert "2026-01-25 4:00:00 AM PST" in attempt.text
     assert "RuntimeError: worker exploded" in attempt.text
     assert f'action="/workflow-gates/{gate_id}/run"' in attempt.text
     assert issue.status_code == 200
@@ -978,6 +996,33 @@ def test_fastapi_attempt_page_creates_code_follow_up_and_renders_draft_pr_gate(t
     assert "## Changes" in draft_pr.text
     assert "## Issue" not in draft_pr.text
     assert "Fixes https://github.com/dbcli/litecli/issues/245" in draft_pr.text
+
+
+def test_fastapi_attempt_page_labels_pr_feedback_gate_explicitly(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    store = _legacy_store(tmp_path)
+    _seed_legacy_issue(store)
+    attempt_id = store.create_attempt(
+        repo="dbcli/litecli",
+        issue_number=245,
+        task_type="code",
+        workflow_version_id=None,
+        status="review",
+    )
+    gate_id = _open_attempt_gate(
+        store,
+        attempt_id,
+        transition_name="push_pr_feedback_fix",
+        gate="review_pr_feedback",
+    )
+
+    response = client.get(f"/attempts/{attempt_id}")
+
+    assert response.status_code == 200
+    assert "push_pr_feedback_fix" in response.text
+    assert "Push Fix to Existing PR" in response.text
+    assert "Run Gate" not in response.text
+    assert f'action="/workflow-gates/{gate_id}/run"' in response.text
 
 
 def test_fastapi_workflow_edit_preview_posts_without_legacy_server(tmp_path: Path) -> None:

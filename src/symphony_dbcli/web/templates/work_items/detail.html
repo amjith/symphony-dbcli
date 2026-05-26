@@ -3,10 +3,6 @@
 <section class="panel">
   <dl class="settings-list">
     <div>
-      <dt>ID</dt>
-      <dd>#{{ work_item.id }}</dd>
-    </div>
-    <div>
       <dt>State</dt>
       <dd>{{ work_item.state_label }}</dd>
     </div>
@@ -68,7 +64,6 @@
     <table class="data-table compact-table">
       <thead>
         <tr>
-          <th>Run</th>
           <th>Attempt</th>
           <th>Task</th>
           <th>Trigger</th>
@@ -80,13 +75,6 @@
       <tbody>
         {% for run in runs %}
         <tr>
-          <td>
-            {% if run.id %}
-            #{{ run.id }}
-            {% else %}
-            <span class="muted">no run</span>
-            {% endif %}
-          </td>
           <td>
             {% if run.attempt_id %}
             <a href="/attempts/{{ run.attempt_id }}">Attempt #{{ run.attempt_id }}</a>
@@ -102,7 +90,6 @@
         </tr>
         {% if run.reasons or run.user_hint %}
         <tr>
-          <td></td>
           <td colspan="6">
             {% if run.reasons %}
             <span class="muted">Reasons: {{ run.reasons|join(", ") }}</span>

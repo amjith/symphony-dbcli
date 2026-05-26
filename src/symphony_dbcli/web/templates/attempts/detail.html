@@ -33,7 +33,11 @@
       {% else %}
       <form action="/workflow-gates/{{ gate.id }}/run" method="post" class="inline-form">
         <input type="hidden" name="return_to" value="{{ return_to }}" />
-        <button type="submit">Run Gate</button>
+        {% if gate.transition_name == "push_pr_feedback_fix" %}
+        <button type="submit">Push Fix to Existing PR</button>
+        {% else %}
+        <button type="submit">Run Workflow Gate</button>
+        {% endif %}
       </form>
       {% endif %}
     </article>
@@ -195,10 +199,10 @@
   {% if detail.timeline %}
   <div class="compact-table-wrap">
     <table class="data-table compact-table">
-      <thead><tr><th>Phase</th><th>Event</th><th>Message</th><th>Duration</th></tr></thead>
+      <thead><tr><th>Time</th><th>Phase</th><th>Event</th><th>Message</th><th>Duration</th></tr></thead>
       <tbody>
         {% for row in detail.timeline %}
-        <tr><td>{{ row.phase }}</td><td>{{ row.event_type }}</td><td>{{ row.message }}</td><td>{{ row.duration_ms|ms }}</td></tr>
+        <tr><td>{{ row.started_at|localtime }}</td><td>{{ row.phase }}</td><td>{{ row.event_type }}</td><td>{{ row.message }}</td><td>{{ row.duration_ms|ms }}</td></tr>
         {% endfor %}
       </tbody>
     </table>

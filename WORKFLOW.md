@@ -59,7 +59,7 @@ host = "127.0.0.1"
 port = 8765
 
 [database]
-path = ".symphony/symphony.db"
+path = "/Users/amjith/.local/state/symphony-dbcli/symphony.db"
 
 [codex]
 command = "codex"
@@ -601,7 +601,7 @@ additional_instructions = ""
 enabled = true
 
 [profiles.local.database]
-path = ".symphony/symphony.db"
+path = "/Users/amjith/.local/state/symphony-dbcli/symphony.db"
 
 [profiles.local.workspace]
 root = ".symphony/worktrees"

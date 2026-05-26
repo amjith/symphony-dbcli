@@ -132,6 +132,23 @@ def test_serve_web_no_reload_runs_fastapi_without_runtime(
     assert "reload" not in calls
 
 
+def test_fastapi_reload_factory_loads_local_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workflow_path = _workflow(tmp_path)
+    env_dir = tmp_path / ".symphony"
+    env_dir.mkdir()
+    (env_dir / "github-app.env").write_text("SYMPHONY_GITHUB_APP_ID=123\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SYMPHONY_WORKFLOW", str(workflow_path))
+    monkeypatch.delenv("SYMPHONY_GITHUB_APP_ID", raising=False)
+
+    from symphony_dbcli.web.app import create_app_from_env
+
+    app = create_app_from_env()
+
+    assert isinstance(app, FastAPI)
+    assert os.environ["SYMPHONY_GITHUB_APP_ID"] == "123"
+
+
 def _workflow(tmp_path: Path) -> Path:
     workflow_path = tmp_path / "WORKFLOW.md"
     config = replace(default_config(), database=DatabaseConfig(path=str(tmp_path / "symphony.db")))
