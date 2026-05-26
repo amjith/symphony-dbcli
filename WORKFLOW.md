@@ -128,6 +128,11 @@ description = "CI, PR comments, and mergeability have been checked."
 terminal = false
 gate = ""
 
+[workflow.states.pr_feedback_context_ready]
+description = "Pull request follow-up context has been prepared for Codex."
+terminal = false
+gate = ""
+
 [workflow.states.pr_follow_up_complete]
 description = "Codex has addressed pull request feedback and needs human review."
 terminal = false
@@ -318,8 +323,44 @@ mergeable = "artifact.pull_request.mergeable"
 mergeable_state = "artifact.pull_request.mergeable_state"
 head_sha = "artifact.pull_request.head_sha"
 
-[workflow.transitions.address_pr_feedback]
+[workflow.transitions.fetch_ci_failure_context]
 from_state = "pr_checks_complete"
+to_state = "pr_feedback_context_ready"
+action = "github.fetch_ci_failure_context"
+trigger = "automatic"
+parallel_group = ""
+description = "Fetch bounded logs and annotations for failed CI checks."
+condition = "ci.has_failures"
+gate = ""
+on_failure = "failed"
+retry_limit = 1
+timeout_seconds = 0
+guidance = ["Prefer failure excerpts, check annotations, and concise summaries over full CI logs."]
+
+[workflow.transitions.fetch_ci_failure_context.inputs]
+pull_request_number = "artifact.pull_request.number"
+failed_checks = "artifact.ci.failed_checks"
+
+[workflow.transitions.fetch_ci_failure_context.outputs]
+failure_context = "artifact.ci.failure_context"
+unavailable_reason = "artifact.ci.failure_context_unavailable_reason"
+
+[workflow.transitions.skip_ci_failure_context]
+from_state = "pr_checks_complete"
+to_state = "pr_feedback_context_ready"
+action = "workflow.noop"
+trigger = "automatic"
+parallel_group = ""
+description = "Continue without CI failure logs when CI has no failures."
+condition = "not ci.has_failures"
+gate = ""
+on_failure = "failed"
+retry_limit = 1
+timeout_seconds = 0
+guidance = ["Only fetch CI failure logs when failed checks are present."]
+
+[workflow.transitions.address_pr_feedback]
+from_state = "pr_feedback_context_ready"
 to_state = "pr_follow_up_complete"
 action = "codex.address_pr_feedback"
 trigger = "automatic"
@@ -335,6 +376,7 @@ guidance = ["Address only the PR feedback captured in workflow artifacts.", "Kee
 [workflow.transitions.address_pr_feedback.inputs]
 pull_request_number = "artifact.pull_request.number"
 failed_checks = "artifact.ci.failed_checks"
+failure_context = "artifact.ci.failure_context"
 checks = "artifact.ci.checks"
 comments = "artifact.review_comments.comments"
 has_conflicts = "artifact.pull_request.has_conflicts"
@@ -355,7 +397,7 @@ timeout_seconds = 0
 guidance = ["Let the human inspect the follow-up fix before pushing it to GitHub."]
 
 [workflow.transitions.wait_existing_pr]
-from_state = "pr_checks_complete"
+from_state = "pr_feedback_context_ready"
 to_state = "pr_waiting"
 action = "workflow.noop"
 trigger = "automatic"

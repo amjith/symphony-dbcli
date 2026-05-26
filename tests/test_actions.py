@@ -20,6 +20,7 @@ def test_action_registry_records_execution_boundaries() -> None:
     draft_pr = DEFAULT_ACTION_REGISTRY.get("github.create_draft_pr")
     fetch_issues = DEFAULT_ACTION_REGISTRY.get("github.fetch_issues")
     find_issue_prs = DEFAULT_ACTION_REGISTRY.get("github.find_issue_pull_requests")
+    ci_failure_context = DEFAULT_ACTION_REGISTRY.get("github.fetch_ci_failure_context")
     pr_comments = DEFAULT_ACTION_REGISTRY.get("github.fetch_pr_review_comments")
     merge_conflicts = DEFAULT_ACTION_REGISTRY.get("github.detect_merge_conflicts")
     address_feedback = DEFAULT_ACTION_REGISTRY.get("codex.address_pr_feedback")
@@ -63,9 +64,16 @@ def test_action_registry_records_execution_boundaries() -> None:
     assert merge_conflicts.output_type == "PullRequestMergeStatus"
     assert "has_conflicts" in merge_conflicts.output_fields
 
+    assert ci_failure_context is not None
+    assert ci_failure_context.side_effect == "github_read"
+    assert ci_failure_context.output_type == "CiFailureContext"
+    assert "failed_checks" in ci_failure_context.input_fields
+    assert "failure_context" in ci_failure_context.output_fields
+
     assert address_feedback is not None
     assert address_feedback.side_effect == "codex_worker"
     assert "failed_checks" in address_feedback.input_fields
+    assert "failure_context" in address_feedback.input_fields
     assert "comments" in address_feedback.input_fields
     assert "has_conflicts" in address_feedback.input_fields
 

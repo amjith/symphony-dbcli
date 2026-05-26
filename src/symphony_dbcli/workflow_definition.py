@@ -99,6 +99,9 @@ def default_workflow_definition() -> WorkflowDefinitionConfig:
             "pr_ready": WorkflowStateConfig("A draft pull request exists and is waiting for merge."),
             "pr_refreshed": WorkflowStateConfig("Latest pull request metadata has been fetched."),
             "pr_checks_complete": WorkflowStateConfig("CI, PR comments, and mergeability have been checked."),
+            "pr_feedback_context_ready": WorkflowStateConfig(
+                "Pull request follow-up context has been prepared for Codex."
+            ),
             "pr_follow_up_complete": WorkflowStateConfig(
                 "Codex has addressed pull request feedback and needs human review.",
                 gate="review_pr_feedback",
@@ -251,7 +254,7 @@ def default_workflow_definition() -> WorkflowDefinitionConfig:
                 ],
             ),
             "address_pr_feedback": WorkflowTransitionConfig(
-                from_state="pr_checks_complete",
+                from_state="pr_feedback_context_ready",
                 to_state="pr_follow_up_complete",
                 action="codex.address_pr_feedback",
                 description="Ask Codex to address PR feedback from CI, comments, and mergeability.",
@@ -260,6 +263,7 @@ def default_workflow_definition() -> WorkflowDefinitionConfig:
                 inputs={
                     "pull_request_number": "artifact.pull_request.number",
                     "failed_checks": "artifact.ci.failed_checks",
+                    "failure_context": "artifact.ci.failure_context",
                     "checks": "artifact.ci.checks",
                     "comments": "artifact.review_comments.comments",
                     "has_conflicts": "artifact.pull_request.has_conflicts",
@@ -269,6 +273,36 @@ def default_workflow_definition() -> WorkflowDefinitionConfig:
                     "Address only the PR feedback captured in workflow artifacts.",
                     "Keep the update focused and preserve the original issue intent.",
                     "Prefer the narrowest local test that validates the change.",
+                ],
+            ),
+            "fetch_ci_failure_context": WorkflowTransitionConfig(
+                from_state="pr_checks_complete",
+                to_state="pr_feedback_context_ready",
+                action="github.fetch_ci_failure_context",
+                description="Fetch bounded logs and annotations for failed CI checks.",
+                condition="ci.has_failures",
+                retry_limit=1,
+                inputs={
+                    "pull_request_number": "artifact.pull_request.number",
+                    "failed_checks": "artifact.ci.failed_checks",
+                },
+                outputs={
+                    "failure_context": "artifact.ci.failure_context",
+                    "unavailable_reason": "artifact.ci.failure_context_unavailable_reason",
+                },
+                guidance=[
+                    "Prefer failure excerpts, check annotations, and concise summaries over full CI logs.",
+                ],
+            ),
+            "skip_ci_failure_context": WorkflowTransitionConfig(
+                from_state="pr_checks_complete",
+                to_state="pr_feedback_context_ready",
+                action="workflow.noop",
+                description="Continue without CI failure logs when CI has no failures.",
+                condition="not ci.has_failures",
+                retry_limit=1,
+                guidance=[
+                    "Only fetch CI failure logs when failed checks are present.",
                 ],
             ),
             "push_pr_feedback_fix": WorkflowTransitionConfig(
@@ -284,7 +318,7 @@ def default_workflow_definition() -> WorkflowDefinitionConfig:
                 ],
             ),
             "wait_existing_pr": WorkflowTransitionConfig(
-                from_state="pr_checks_complete",
+                from_state="pr_feedback_context_ready",
                 to_state="pr_waiting",
                 action="workflow.noop",
                 description="Wait when the associated PR has no current Symphony follow-up.",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -19,6 +20,19 @@ from .store import IssueSnapshot
 
 class GitHubError(RuntimeError):
     """Raised when GitHub API calls fail."""
+
+
+MAX_CI_FAILURE_CONTEXT_CHECKS = 5
+MAX_CI_ANNOTATIONS_PER_CHECK = 10
+MAX_CI_OUTPUT_CHARS = 4_000
+MAX_CI_LOG_CHARS = 12_000
+MAX_CI_LOG_BYTES = 240_000
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+FAILURE_LINE_RE = re.compile(
+    r"(::error|traceback|assertionerror|failed\b|failure\b|error:|failures|"
+    r"exception|expected .* actual|expected .* got)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -138,6 +152,39 @@ class GitHubCheckRun:
     status: str
     conclusion: str
     url: str
+
+
+@dataclass(frozen=True)
+class GitHubCheckAnnotation:
+    path: str
+    start_line: int | None
+    end_line: int | None
+    annotation_level: str
+    title: str
+    message: str
+    raw_details: str
+    url: str
+
+
+@dataclass(frozen=True)
+class GitHubCiFailureCheckContext:
+    name: str
+    status: str
+    conclusion: str
+    url: str
+    details_url: str
+    summary: str
+    text: str
+    annotations: list[GitHubCheckAnnotation]
+    log_excerpt: str
+    unavailable_reason: str = ""
+
+
+@dataclass(frozen=True)
+class GitHubCiFailureContext:
+    sha: str
+    failed_checks: list[GitHubCiFailureCheckContext]
+    unavailable_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -264,6 +311,91 @@ class GitHubClient:
         combined_status = self._request_json("GET", f"/repos/{repo}/commits/{sha}/status")
         return _ci_status_from_json(sha, check_runs, combined_status)
 
+    def ci_failure_context(
+        self,
+        repo: str,
+        pull_request_number: int,
+        failed_checks: list[GitHubCheckRun],
+    ) -> GitHubCiFailureContext:
+        pull_request = self._request_json("GET", f"/repos/{repo}/pulls/{pull_request_number}")
+        sha = _head_sha(pull_request)
+        if not sha:
+            raise GitHubError(f"Pull request {repo}#{pull_request_number} does not have a head SHA.")
+        check_runs = self._request_json(
+            "GET",
+            f"/repos/{repo}/commits/{sha}/check-runs?per_page=100",
+        )
+        failed_check_runs = _matching_failed_check_runs(check_runs, failed_checks)
+        contexts = [
+            self._ci_failure_check_context(repo, item)
+            for item in failed_check_runs[:MAX_CI_FAILURE_CONTEXT_CHECKS]
+        ]
+        missing_status_contexts = _missing_status_contexts(failed_checks, failed_check_runs)
+        contexts.extend(missing_status_contexts[: MAX_CI_FAILURE_CONTEXT_CHECKS - len(contexts)])
+        unavailable_reason = ""
+        if failed_checks and not contexts:
+            unavailable_reason = "No failed check-run log data was available from GitHub."
+        return GitHubCiFailureContext(
+            sha=sha,
+            failed_checks=contexts,
+            unavailable_reason=unavailable_reason,
+        )
+
+    def _ci_failure_check_context(
+        self,
+        repo: str,
+        data: dict[str, Any],
+    ) -> GitHubCiFailureCheckContext:
+        check_run_id = _optional_int(data.get("id"))
+        output = _json_object(data.get("output"))
+        annotations: list[GitHubCheckAnnotation] = []
+        annotation_error = ""
+        if check_run_id is not None:
+            try:
+                annotations = self._check_run_annotations(repo, check_run_id)
+            except GitHubError as exc:
+                annotation_error = str(exc)
+        log_excerpt = ""
+        log_error = ""
+        job_id = _actions_job_id(data)
+        if job_id is not None:
+            try:
+                log_excerpt = _failure_log_excerpt(
+                    self._request_text("GET", f"/repos/{repo}/actions/jobs/{job_id}/logs")
+                )
+            except GitHubError as exc:
+                log_error = str(exc)
+        unavailable_reason = _unavailable_reason(
+            has_context=bool(
+                _str_text(output.get("summary"))
+                or _str_text(output.get("text"))
+                or annotations
+                or log_excerpt
+            ),
+            annotation_error=annotation_error,
+            log_error=log_error,
+            job_id=job_id,
+        )
+        return GitHubCiFailureCheckContext(
+            name=str(data.get("name") or ""),
+            status=str(data.get("status") or ""),
+            conclusion=str(data.get("conclusion") or ""),
+            url=str(data.get("html_url") or ""),
+            details_url=str(data.get("details_url") or ""),
+            summary=_truncate_text(_str_text(output.get("summary")), MAX_CI_OUTPUT_CHARS),
+            text=_truncate_text(_str_text(output.get("text")), MAX_CI_OUTPUT_CHARS),
+            annotations=annotations,
+            log_excerpt=log_excerpt,
+            unavailable_reason=unavailable_reason,
+        )
+
+    def _check_run_annotations(self, repo: str, check_run_id: int) -> list[GitHubCheckAnnotation]:
+        data = self._request_json(
+            "GET",
+            f"/repos/{repo}/check-runs/{check_run_id}/annotations?per_page={MAX_CI_ANNOTATIONS_PER_CHECK}",
+        )
+        return [_annotation_from_json(item) for item in _json_objects(data)]
+
     def push_branch(self, *, repo: str, worktree_path: str, branch: str) -> None:
         token = self._require_token()
         remote_url = self.auth.authenticated_git_url(repo)
@@ -334,6 +466,10 @@ class GitHubClient:
             expect_empty=expect_empty,
         )
 
+    def _request_text(self, method: str, path: str) -> str:
+        token = self.auth.api_token()
+        return request_text(self.config.api_base_url, method, path, token=token)
+
     def _require_token(self) -> str:
         try:
             return self.auth.require_api_token()
@@ -370,6 +506,30 @@ def request_json(
     if expect_empty or not data:
         return None
     return cast(Any, json.loads(data.decode("utf-8")))
+
+
+def request_text(
+    api_base_url: str,
+    method: str,
+    path: str,
+    *,
+    token: str | None = None,
+) -> str:
+    url = api_base_url.rstrip("/") + path
+    request = urllib.request.Request(url, method=method)
+    request.add_header("Accept", "text/plain")
+    request.add_header("X-GitHub-Api-Version", "2022-11-28")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            data = response.read(MAX_CI_LOG_BYTES)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise GitHubError(f"GitHub API {method} {path} failed: {exc.code} {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise GitHubError(f"GitHub API {method} {path} failed: {exc.reason}") from exc
+    return cast(bytes, data).decode("utf-8", errors="replace")
 
 
 def _pull_request_from_json(data: dict[str, Any]) -> PullRequest:
@@ -493,6 +653,152 @@ def _ci_status_from_json(
         failed_checks=failed_checks,
         checks=checks,
     )
+
+
+def _matching_failed_check_runs(
+    check_runs_data: dict[str, Any],
+    failed_checks: list[GitHubCheckRun],
+) -> list[dict[str, Any]]:
+    failed_names = {check.name for check in failed_checks if check.name}
+    failed_urls = {check.url for check in failed_checks if check.url}
+    check_runs = _json_objects(check_runs_data.get("check_runs"))
+    return [
+        item
+        for item in check_runs
+        if str(item.get("conclusion") or "") in FAILURE_CONCLUSIONS
+        and _check_matches_failed_status(item, failed_names, failed_urls)
+    ]
+
+
+def _check_matches_failed_status(
+    check_run: dict[str, Any],
+    failed_names: set[str],
+    failed_urls: set[str],
+) -> bool:
+    if not failed_names and not failed_urls:
+        return True
+    name = str(check_run.get("name") or "")
+    html_url = str(check_run.get("html_url") or "")
+    details_url = str(check_run.get("details_url") or "")
+    return name in failed_names or html_url in failed_urls or details_url in failed_urls
+
+
+def _missing_status_contexts(
+    failed_checks: list[GitHubCheckRun],
+    failed_check_runs: list[dict[str, Any]],
+) -> list[GitHubCiFailureCheckContext]:
+    matched_names = {str(item.get("name") or "") for item in failed_check_runs}
+    matched_urls = {
+        url
+        for item in failed_check_runs
+        for url in (str(item.get("html_url") or ""), str(item.get("details_url") or ""))
+        if url
+    }
+    contexts: list[GitHubCiFailureCheckContext] = []
+    for check in failed_checks:
+        if check.name in matched_names or check.url in matched_urls:
+            continue
+        contexts.append(
+            GitHubCiFailureCheckContext(
+                name=check.name,
+                status=check.status,
+                conclusion=check.conclusion,
+                url=check.url,
+                details_url="",
+                summary="",
+                text="",
+                annotations=[],
+                log_excerpt="",
+                unavailable_reason="No GitHub check-run annotations or Actions job logs were available for this status check.",
+            )
+        )
+    return contexts
+
+
+def _annotation_from_json(data: dict[str, Any]) -> GitHubCheckAnnotation:
+    return GitHubCheckAnnotation(
+        path=str(data.get("path") or ""),
+        start_line=_optional_int(data.get("start_line")),
+        end_line=_optional_int(data.get("end_line")),
+        annotation_level=str(data.get("annotation_level") or ""),
+        title=str(data.get("title") or ""),
+        message=_truncate_text(_str_text(data.get("message")), MAX_CI_OUTPUT_CHARS),
+        raw_details=_truncate_text(_str_text(data.get("raw_details")), MAX_CI_OUTPUT_CHARS),
+        url=str(data.get("blob_href") or ""),
+    )
+
+
+def _actions_job_id(data: dict[str, Any]) -> int | None:
+    for field in ("details_url", "html_url"):
+        match = re.search(r"/job/(?P<job_id>\d+)", str(data.get(field) or ""))
+        if match:
+            return int(match.group("job_id"))
+    return None
+
+
+def _failure_log_excerpt(log_text: str) -> str:
+    cleaned = ANSI_ESCAPE_RE.sub("", log_text.replace("\r\n", "\n").replace("\r", "\n"))
+    lines = [line.rstrip() for line in cleaned.splitlines()]
+    if not lines:
+        return ""
+    marker_indexes = [index for index, line in enumerate(lines) if FAILURE_LINE_RE.search(line)]
+    if not marker_indexes:
+        return _truncate_text("\n".join(lines[-80:]), MAX_CI_LOG_CHARS)
+    ranges = _merged_line_windows(marker_indexes, before=20, after=40, limit=len(lines))
+    excerpt_lines: list[str] = []
+    for index, (start, end) in enumerate(ranges):
+        if index:
+            excerpt_lines.append("...")
+        excerpt_lines.extend(lines[start:end])
+    return _truncate_text("\n".join(excerpt_lines), MAX_CI_LOG_CHARS)
+
+
+def _merged_line_windows(
+    indexes: list[int],
+    *,
+    before: int,
+    after: int,
+    limit: int,
+) -> list[tuple[int, int]]:
+    ranges: list[tuple[int, int]] = []
+    for index in indexes:
+        start = max(0, index - before)
+        end = min(limit, index + after + 1)
+        if ranges and start <= ranges[-1][1]:
+            previous_start, previous_end = ranges[-1]
+            ranges[-1] = (previous_start, max(previous_end, end))
+        else:
+            ranges.append((start, end))
+    return ranges[:3]
+
+
+def _unavailable_reason(
+    *,
+    has_context: bool,
+    annotation_error: str,
+    log_error: str,
+    job_id: int | None,
+) -> str:
+    if has_context:
+        return ""
+    reasons: list[str] = []
+    if annotation_error:
+        reasons.append(f"annotations unavailable: {annotation_error}")
+    if log_error:
+        reasons.append(f"job log unavailable: {log_error}")
+    elif job_id is None:
+        reasons.append("check did not include a GitHub Actions job URL")
+    return "; ".join(reasons) or "No failure output was available for this check."
+
+
+def _truncate_text(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: limit - 14].rstrip() + "\n...[truncated]"
+
+
+def _str_text(value: object) -> str:
+    return "" if value is None else str(value).strip()
 
 
 def _status_checks_from_json(data: dict[str, Any]) -> list[GitHubCheckRun]:

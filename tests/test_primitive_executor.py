@@ -9,7 +9,10 @@ from sqlalchemy import select
 
 from symphony_dbcli.config import CodexConfig, PolicyConfig, WorkflowConfig, WorkspaceConfig, default_config
 from symphony_dbcli.github import (
+    GitHubCheckAnnotation,
     GitHubCheckRun,
+    GitHubCiFailureCheckContext,
+    GitHubCiFailureContext,
     GitHubCiStatus,
     GitHubComment,
     GitHubIssue,
@@ -240,6 +243,54 @@ def test_fetch_ci_status_returns_failed_checks(tmp_path: Path) -> None:
     ]
 
 
+def test_fetch_ci_failure_context_returns_failure_output(tmp_path: Path) -> None:
+    executor = PrimitiveExecutor(default_config(), _store(tmp_path), github=FakePrimitiveGitHub())
+
+    output = executor.execute(
+        _context(
+            "github.fetch_ci_failure_context",
+            input_data={
+                "pull_request_number": 12,
+                "failed_checks": [
+                    {
+                        "name": "tests",
+                        "status": "completed",
+                        "conclusion": "failure",
+                        "url": "https://github.com/dbcli/litecli/actions/runs/1",
+                    }
+                ],
+            },
+        )
+    ).output
+
+    assert output["sha"] == "abc123"
+    assert output["failure_context"] == [
+        {
+            "name": "tests",
+            "status": "completed",
+            "conclusion": "failure",
+            "url": "https://github.com/dbcli/litecli/actions/runs/1",
+            "details_url": "https://github.com/dbcli/litecli/actions/runs/1/job/2",
+            "summary": "pytest failed",
+            "text": "tests/test_app.py::test_login failed",
+            "annotations": [
+                {
+                    "path": "tests/test_app.py",
+                    "start_line": 42,
+                    "end_line": 42,
+                    "annotation_level": "failure",
+                    "title": "AssertionError",
+                    "message": "expected 200, got 500",
+                    "raw_details": "Traceback (most recent call last): ...",
+                    "url": "https://github.com/dbcli/litecli/blob/main/tests/test_app.py#L42",
+                }
+            ],
+            "log_excerpt": "FAILED tests/test_app.py::test_login - AssertionError",
+            "unavailable_reason": "",
+        }
+    ]
+
+
 def test_fetch_pr_review_comments_returns_review_and_inline_comments(tmp_path: Path) -> None:
     executor = PrimitiveExecutor(default_config(), _store(tmp_path), github=FakePrimitiveGitHub())
 
@@ -400,6 +451,13 @@ def test_fix_ci_failures_runs_codex_with_failed_check_context(tmp_path: Path) ->
             input_data={
                 "pull_request_number": 12,
                 "failed_checks": [{"name": "tests", "conclusion": "failure", "url": "https://ci/1"}],
+                "failure_context": [
+                    {
+                        "name": "tests",
+                        "conclusion": "failure",
+                        "log_excerpt": "FAILED tests/test_app.py::test_login - AssertionError",
+                    }
+                ],
                 "checks": [{"name": "lint", "conclusion": "success"}],
             },
         )
@@ -409,6 +467,8 @@ def test_fix_ci_failures_runs_codex_with_failed_check_context(tmp_path: Path) ->
     prompt = prompt_path.read_text(encoding="utf-8")
     assert "Failed checks:" in prompt
     assert "name=tests" in prompt
+    assert "CI failure context:" in prompt
+    assert "FAILED tests/test_app.py::test_login - AssertionError" in prompt
     assert "All checks:" in prompt
     assert output["result_type"] == "ci_fix_summary"
     assert detail is not None
@@ -431,6 +491,21 @@ def test_address_pr_feedback_runs_codex_with_combined_pr_context(tmp_path: Path)
             input_data={
                 "pull_request_number": 12,
                 "failed_checks": [{"name": "tests", "conclusion": "failure", "url": "https://ci/1"}],
+                "failure_context": [
+                    {
+                        "name": "tests",
+                        "conclusion": "failure",
+                        "summary": "pytest failed",
+                        "annotations": [
+                            {
+                                "path": "tests/test_app.py",
+                                "start_line": 42,
+                                "title": "AssertionError",
+                                "message": "expected 200, got 500",
+                            }
+                        ],
+                    }
+                ],
                 "checks": [{"name": "lint", "conclusion": "success"}],
                 "comments": [{"body": "Please add a regression test.", "author": "reviewer"}],
                 "has_conflicts": True,
@@ -444,6 +519,8 @@ def test_address_pr_feedback_runs_codex_with_combined_pr_context(tmp_path: Path)
     assert "Address the pull request feedback below in one focused update." in prompt
     assert "Merge conflicts: yes; mergeable_state=dirty" in prompt
     assert "name=tests" in prompt
+    assert "pytest failed" in prompt
+    assert "tests/test_app.py:42 AssertionError - expected 200, got 500" in prompt
     assert "Please add a regression test." in prompt
     assert output["result_type"] == "pr_feedback_update"
     assert detail is not None
@@ -701,6 +778,40 @@ class FakePrimitiveGitHub:
             conclusion="failure",
             failed_checks=[failed_check],
             checks=[failed_check],
+        )
+
+    def ci_failure_context(
+        self,
+        repo: str,
+        pull_request_number: int,
+        failed_checks: list[GitHubCheckRun],
+    ) -> GitHubCiFailureContext:
+        return GitHubCiFailureContext(
+            sha="abc123",
+            failed_checks=[
+                GitHubCiFailureCheckContext(
+                    name="tests",
+                    status="completed",
+                    conclusion="failure",
+                    url=f"https://github.com/{repo}/actions/runs/1",
+                    details_url=f"https://github.com/{repo}/actions/runs/1/job/2",
+                    summary="pytest failed",
+                    text="tests/test_app.py::test_login failed",
+                    annotations=[
+                        GitHubCheckAnnotation(
+                            path="tests/test_app.py",
+                            start_line=42,
+                            end_line=42,
+                            annotation_level="failure",
+                            title="AssertionError",
+                            message="expected 200, got 500",
+                            raw_details="Traceback (most recent call last): ...",
+                            url=f"https://github.com/{repo}/blob/main/tests/test_app.py#L42",
+                        )
+                    ],
+                    log_excerpt="FAILED tests/test_app.py::test_login - AssertionError",
+                )
+            ],
         )
 
     def push_branch(self, *, repo: str, worktree_path: str, branch: str) -> None:

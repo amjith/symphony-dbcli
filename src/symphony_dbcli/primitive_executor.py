@@ -7,6 +7,8 @@ from typing import Any, Protocol, cast
 from .config import WorkflowConfig
 from .db import create_db_engine, create_session_factory
 from .github import (
+    GitHubCheckRun,
+    GitHubCiFailureContext,
     GitHubCiStatus,
     GitHubClient,
     GitHubComment,
@@ -62,6 +64,13 @@ class PrimitiveGitHubClient(Protocol):
     def merge_status(self, repo: str, pull_request_number: int) -> PullRequestMergeStatus: ...
 
     def ci_status(self, repo: str, pull_request_number: int) -> GitHubCiStatus: ...
+
+    def ci_failure_context(
+        self,
+        repo: str,
+        pull_request_number: int,
+        failed_checks: list[GitHubCheckRun],
+    ) -> GitHubCiFailureContext: ...
 
 
 @dataclass(frozen=True)
@@ -154,6 +163,8 @@ class PrimitiveExecutor:
             return self._fetch_pull_request(context)
         if context.transition.action == "github.fetch_ci_status":
             return self._fetch_ci_status(context)
+        if context.transition.action == "github.fetch_ci_failure_context":
+            return self._fetch_ci_failure_context(context)
         if context.transition.action == "github.fetch_pr_review_comments":
             return self._fetch_pr_review_comments(context)
         if context.transition.action == "github.detect_merge_conflicts":
@@ -351,6 +362,31 @@ class PrimitiveExecutor:
     def _fetch_ci_status(self, context: PrimitiveContext) -> PrimitiveOutcome:
         pull_request_number = _required_int(context.input_data, "pull_request_number")
         return PrimitiveOutcome(asdict(self.github.ci_status(context.repo, pull_request_number)))
+
+    def _fetch_ci_failure_context(self, context: PrimitiveContext) -> PrimitiveOutcome:
+        pull_request_number = _required_int(context.input_data, "pull_request_number")
+        failed_checks = _check_runs_from_input(context.input_data, "failed_checks")
+        try:
+            failure_context = self.github.ci_failure_context(
+                context.repo,
+                pull_request_number,
+                failed_checks,
+            )
+        except GitHubError as exc:
+            return PrimitiveOutcome(
+                {
+                    "failure_context": [],
+                    "sha": "",
+                    "unavailable_reason": str(exc),
+                }
+            )
+        return PrimitiveOutcome(
+            {
+                "failure_context": [asdict(check) for check in failure_context.failed_checks],
+                "sha": failure_context.sha,
+                "unavailable_reason": failure_context.unavailable_reason,
+            }
+        )
 
     def _fetch_pr_review_comments(self, context: PrimitiveContext) -> PrimitiveOutcome:
         pull_request_number = _required_int(context.input_data, "pull_request_number")
@@ -762,12 +798,14 @@ def _codex_task_context(context: PrimitiveContext) -> str:
         pull_request_number = _required_int(context.input_data, "pull_request_number")
         failed_checks = _input_dicts(context.input_data, "failed_checks")
         checks = _input_dicts(context.input_data, "checks")
+        failure_context = _input_dicts(context.input_data, "failure_context")
         return "\n".join(
             [
                 work_item_context,
                 f"Pull request: https://github.com/{context.repo}/pull/{pull_request_number}",
                 "Inspect the failing CI checks below, fix the issue, and rerun the narrowest relevant tests.",
                 _format_records("Failed checks", failed_checks),
+                _format_ci_failure_context(failure_context),
                 _format_records("All checks", checks),
             ]
         ).strip()
@@ -776,6 +814,7 @@ def _codex_task_context(context: PrimitiveContext) -> str:
         comments = _input_dicts(context.input_data, "comments")
         failed_checks = _input_dicts(context.input_data, "failed_checks")
         checks = _input_dicts(context.input_data, "checks")
+        failure_context = _input_dicts(context.input_data, "failure_context")
         has_conflicts = bool(context.input_data.get("has_conflicts"))
         mergeable_state = str(context.input_data.get("mergeable_state") or "")
         conflict_text = (
@@ -790,6 +829,7 @@ def _codex_task_context(context: PrimitiveContext) -> str:
                 "Address the pull request feedback below in one focused update.",
                 conflict_text,
                 _format_records("Failed checks", failed_checks),
+                _format_ci_failure_context(failure_context),
                 _format_records("All checks", checks),
                 _format_records("Review comments", comments),
             ]
@@ -845,6 +885,18 @@ def _input_dicts(data: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return cast(list[dict[str, Any]], data.get(key) or [])
 
 
+def _check_runs_from_input(data: dict[str, Any], key: str) -> list[GitHubCheckRun]:
+    return [
+        GitHubCheckRun(
+            name=str(item.get("name") or ""),
+            status=str(item.get("status") or ""),
+            conclusion=str(item.get("conclusion") or ""),
+            url=str(item.get("url") or ""),
+        )
+        for item in _input_dicts(data, key)
+    ]
+
+
 def _format_records(title: str, records: list[dict[str, Any]]) -> str:
     if not records:
         return f"{title}: none provided."
@@ -857,3 +909,45 @@ def _format_records(title: str, records: list[dict[str, Any]]) -> str:
         ]
         lines.append(f"{index}. " + "; ".join(fields))
     return "\n".join(lines)
+
+
+def _format_ci_failure_context(records: list[dict[str, Any]]) -> str:
+    if not records:
+        return "CI failure context: none provided."
+    lines = ["CI failure context:"]
+    for index, record in enumerate(records, start=1):
+        name = str(record.get("name") or "unnamed check")
+        conclusion = str(record.get("conclusion") or "unknown")
+        url = str(record.get("url") or record.get("details_url") or "")
+        lines.append(f"{index}. {name} ({conclusion})" + (f" {url}" if url else ""))
+        for record_field, label in (
+            ("summary", "summary"),
+            ("text", "output"),
+            ("log_excerpt", "log excerpt"),
+        ):
+            value = str(record.get(record_field) or "").strip()
+            if value:
+                lines.append(f"   {label}:")
+                lines.extend(f"   {line}" for line in value.splitlines())
+        annotations = cast(list[dict[str, Any]], record.get("annotations") or [])
+        for annotation in annotations:
+            location = _annotation_location(annotation)
+            title = str(annotation.get("title") or "").strip()
+            message = str(annotation.get("message") or "").strip()
+            details = " - ".join(part for part in (title, message) if part)
+            if details:
+                lines.append(f"   annotation: {location}{details}")
+        unavailable_reason = str(record.get("unavailable_reason") or "").strip()
+        if unavailable_reason:
+            lines.append(f"   unavailable: {unavailable_reason}")
+    return "\n".join(lines)
+
+
+def _annotation_location(annotation: dict[str, Any]) -> str:
+    path = str(annotation.get("path") or "").strip()
+    line = annotation.get("start_line") or annotation.get("line")
+    if path and line:
+        return f"{path}:{line} "
+    if path:
+        return f"{path} "
+    return ""

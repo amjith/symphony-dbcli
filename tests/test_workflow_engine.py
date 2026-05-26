@@ -67,6 +67,39 @@ def test_workflow_engine_returns_parallel_batch_for_pr_checks() -> None:
     }
 
 
+def test_workflow_engine_fetches_ci_failure_context_before_pr_feedback() -> None:
+    engine = WorkflowEngine(default_config().workflow)
+
+    failure_context_match = engine.single_transition(
+        from_state="pr_checks_complete",
+        trigger="automatic",
+        context=WorkflowExecutionContext(
+            task_type="code",
+            artifacts={"ci.failed_checks": [{"name": "tests"}]},
+        ),
+    )
+    skip_match = engine.single_transition(
+        from_state="pr_checks_complete",
+        trigger="automatic",
+        context=WorkflowExecutionContext(task_type="code", artifacts={"ci.failed_checks": []}),
+    )
+    feedback_match = engine.single_transition(
+        from_state="pr_feedback_context_ready",
+        trigger="automatic",
+        context=WorkflowExecutionContext(
+            task_type="code",
+            artifacts={"ci.failed_checks": [{"name": "tests"}]},
+        ),
+    )
+
+    assert failure_context_match is not None
+    assert failure_context_match.name == "fetch_ci_failure_context"
+    assert skip_match is not None
+    assert skip_match.name == "skip_ci_failure_context"
+    assert feedback_match is not None
+    assert feedback_match.name == "address_pr_feedback"
+
+
 def test_condition_matching_rejects_unknown_conditions() -> None:
     assert condition_matches('task.type == "code"', WorkflowExecutionContext(task_type="code")) is True
 

@@ -16,6 +16,8 @@ from .actions import DEFAULT_ACTION_REGISTRY, PrimitiveSideEffect
 from .config import WorkflowConfig, WorkflowError, parse_workflow
 from .db import create_db_engine, create_session_factory
 from .github import (
+    GitHubCheckRun,
+    GitHubCiFailureContext,
     GitHubCiStatus,
     GitHubClient,
     GitHubComment,
@@ -74,6 +76,13 @@ class OrchestratorGitHubClient(Protocol):
     def merge_status(self, repo: str, pull_request_number: int) -> PullRequestMergeStatus: ...
 
     def ci_status(self, repo: str, pull_request_number: int) -> GitHubCiStatus: ...
+
+    def ci_failure_context(
+        self,
+        repo: str,
+        pull_request_number: int,
+        failed_checks: list[GitHubCheckRun],
+    ) -> GitHubCiFailureContext: ...
 
 
 @dataclass(frozen=True)

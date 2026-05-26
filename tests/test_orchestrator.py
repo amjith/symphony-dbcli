@@ -8,6 +8,7 @@ from symphony_dbcli.config import WorkflowConfig, WorkspaceConfig, default_confi
 from symphony_dbcli.db import create_db_engine, create_session_factory
 from symphony_dbcli.github import (
     GitHubCheckRun,
+    GitHubCiFailureContext,
     GitHubCiStatus,
     GitHubComment,
     GitHubIssue,
@@ -261,13 +262,16 @@ def test_orchestrator_fans_out_pr_checks_and_feeds_combined_follow_up(tmp_path: 
         "check_pr_mergeability",
     }
     assert check_transitions.issubset(set(primitives.transitions))
+    assert "fetch_ci_failure_context" in primitives.transitions
     assert "address_pr_feedback" in primitives.transitions
     assert instance is not None
     assert instance["current_state"] == "pr_follow_up_complete"
     assert artifacts["ci.failed_checks"] == [{"name": "tests", "conclusion": "failure"}]
+    assert artifacts["ci.failure_context"] == [{"name": "tests", "log_excerpt": "failing test"}]
     assert artifacts["review_comments.comments"] == [{"body": "Please add a regression test."}]
     assert [row["transition_name"] for row in transitions] == [
         "initial_pr_checks",
+        "fetch_ci_failure_context",
         "address_pr_feedback",
     ]
     assert transitions[0]["action_name"] == "workflow.parallel"
@@ -739,6 +743,14 @@ class FakeCleanupGitHub:
             checks=[GitHubCheckRun(name="tests", status="completed", conclusion="success", url="")],
         )
 
+    def ci_failure_context(
+        self,
+        repo: str,
+        pull_request_number: int,
+        failed_checks: list[GitHubCheckRun],
+    ) -> GitHubCiFailureContext:
+        return GitHubCiFailureContext(sha="", failed_checks=[])
+
 
 class FakeWorkflowPrimitives:
     def __init__(self, *, fail_once: set[str] | None = None, pr_feedback: bool = False) -> None:
@@ -799,6 +811,14 @@ class FakeWorkflowPrimitives:
                     "checks": [{"name": "tests", "conclusion": "failure"}],
                     "state": "failure",
                     "conclusion": "failure",
+                }
+            )
+        if self.pr_feedback and context.transition_name == "fetch_ci_failure_context":
+            return PrimitiveOutcome(
+                {
+                    "failure_context": [{"name": "tests", "log_excerpt": "failing test"}],
+                    "sha": "abc123",
+                    "unavailable_reason": "",
                 }
             )
         if self.pr_feedback and context.transition_name in {"check_pr_comments", "refresh_pr_comments"}:

@@ -330,6 +330,13 @@ def _codex_follow_up_input(action: str, pull_request_number: int) -> dict[str, A
                     "url": "",
                 }
             ],
+            "failure_context": [
+                {
+                    "name": "fixture-tests",
+                    "conclusion": "failure",
+                    "log_excerpt": "FAILED fixture test suite",
+                }
+            ],
             "checks": [],
         }
     return {"pull_request_number": pull_request_number}
