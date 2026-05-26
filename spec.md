@@ -116,7 +116,7 @@ history. Workers run against work items, not raw provider ids.
 A work item:
 
 - links to one or more source items
-- has a kanban state
+- has a kanban state defined by the active workflow configuration
 - has a task type
 - may have an optional human hint
 - may have rerun reasons
@@ -128,13 +128,46 @@ A work item:
 The orchestrator stores kanban state in SQLite. External tracker state may be
 synced and displayed, but it is not the queue authority.
 
-Required states:
+Kanban states are user-configurable in `WORKFLOW.md`. The backend and frontend
+clients must read state definitions from the accepted workflow version instead
+of hardcoding column names. Users may add states such as `triage`, `blocked`,
+`qa`, `ready_to_merge`, or `deferred`, and may remove default states that do
+not fit their process.
+
+Customization is for power users. A fresh installation should work out of the
+box with an excellent, opinionated default board, sensible transition behavior,
+and no requirement to design a workflow before the first useful run. Workflow
+initialization should generate the default kanban state definitions, role
+mappings, and move policies automatically.
+
+The default workflow should provide these states:
 
 - `backlog`: synced external item exists, but has not been queued
 - `todo`: human selected it for orchestration
 - `in_progress`: worker or workflow is actively handling it
 - `in_review`: output, PR update, answer, or operation summary needs review
 - `done`: work is complete
+
+Each configured kanban state should define:
+
+- stable state id
+- display label
+- board order
+- state role, such as backlog, queued, active, review, blocked, or terminal
+- whether source items can be activated into it
+- whether entering it queues a worker run
+- whether entering it should schedule a runtime cycle
+- whether it opens a human gate
+- allowed manual transitions, if the workflow wants to restrict moves
+- default outcome rules for terminal states
+
+Some semantic roles are required even when state names differ:
+
+- one backlog-like role for synced source items not yet accepted as work
+- one queued role that represents work selected for orchestration
+- one active role that workers can claim
+- one review/gated role for human inspection
+- at least one terminal role
 
 Recommended terminal outcomes:
 
@@ -149,23 +182,29 @@ Recommended terminal outcomes:
 
 Moving cards is a workflow input, not just a UI update.
 
-- `backlog -> todo`: creates or reuses a work item. If task type is ambiguous,
-  the API should require one of `research`, `code`, or `operations`. The move
-  may include an optional hint that is stored on the work item and fed into
-  worker prompts.
-- `todo -> in_progress`: queues a worker run and lets the runtime claim it.
-- `in_review -> in_progress`: queues a rerun. The request may include rerun
-  reasons such as `fix_ci`, `address_pr_comments`, `resolve_merge_conflicts`,
-  `continue_implementation`, `revise_answer`, or `rerun_from_top`.
-- For `in_review -> in_progress`, do not automatically reuse the original
+- Moving from a backlog-like state into a queued role creates or reuses a work
+  item. If task type is ambiguous, the API should require one of `research`,
+  `code`, or `operations`. The move may include an optional hint that is stored
+  on the work item and fed into worker prompts.
+- Moving into an active role queues a worker run and lets the runtime claim it.
+- Moving from a review/gated role back into an active role queues a rerun. The
+  request may include rerun reasons such as `fix_ci`, `address_pr_comments`,
+  `resolve_merge_conflicts`, `continue_implementation`, `revise_answer`, or
+  `rerun_from_top`.
+- For review-to-active reruns, do not automatically reuse the original
   activation hint. Use the rerun note/hint for that transition only; stale
   activation context can confuse the worker.
-- Moving to `done` should require an explicit outcome or external completion
-  signal.
+- Moving to a terminal role should require an explicit outcome or external
+  completion signal.
 
-When a move to `in_progress` should wake workers, the HTTP response should not
+When entering a state configured to wake workers, the HTTP response should not
 wait for a full orchestration cycle. Persist the state and queued run first,
 return the response, then schedule a runtime cycle after the response.
+
+Workflow changes that add, remove, or rename kanban states must be validated
+against existing work items. The system should require an explicit migration or
+state mapping when accepted workflow changes would strand existing work items in
+unknown states.
 
 ## Task Types
 
@@ -197,6 +236,7 @@ Required top-level configuration areas:
 - profile selection
 - ticket source adapters
 - source repository adapters
+- kanban state definitions and role mappings
 - workspace strategy
 - worker limits and heartbeat/timeout policy
 - dashboard/API binding
@@ -214,6 +254,8 @@ The workflow definition must support:
 - `initial_state`
 - terminal states
 - named states with descriptions and optional gates
+- kanban metadata for each state, including display label, board order, and
+  role
 - named transitions
 - `from_state` and `to_state`
 - action primitive name
@@ -232,6 +274,9 @@ The runtime should reject workflows with:
 
 - unknown actions
 - invalid state references
+- missing required kanban roles
+- duplicate kanban order values within one board
+- state removals without migration rules for existing work items
 - unreachable non-terminal states
 - invalid gate references
 - action input/output mapping mismatches
@@ -468,6 +513,8 @@ Recommended route groups:
 - `/api/work-items/{id}/runs`
 - `/api/work-items/{id}/links`
 - `/api/work-items/{id}/active-pr`
+- `/api/kanban/states`
+- `/api/kanban/transitions`
 - `/api/workflow`
 - `/api/workflow/versions`
 - `/api/workflow/validate`
@@ -484,6 +531,8 @@ Recommended route groups:
 API behavior:
 
 - write endpoints should validate state transitions server-side
+- board clients should fetch kanban state order, labels, roles, and allowed
+  transitions from the accepted workflow version
 - responses should include durable ids and links to related resources
 - human-gate endpoints should accept edited artifacts before side effects
 - long orchestration cycles should not block ordinary UI/API state changes
